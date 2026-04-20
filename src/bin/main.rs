@@ -1,11 +1,5 @@
 #![no_std]
 #![no_main]
-// #![deny(
-//     clippy::mem_forget,
-//     reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-//     holding buffers for the duration of a data transfer."
-// )]
-// #![deny(clippy::large_stack_frames)]
 use core::net::Ipv4Addr;
 use defmt::info;
 use embassy_executor::Spawner;
@@ -29,6 +23,12 @@ use esp_radio::wifi::{
     Config, ControllerConfig, Interface, WifiController, ap::AccessPointConfig, sta::StationConfig,
 };
 use esp_rtos as _;
+use esp32::myrtio_mqtt::{
+    MqttOptions, QoS, TcpTransport,
+    client::MqttClient,
+    packet::Publish,
+    runtime::{MqttModule, MqttRuntime, PublishOutbox, PublishRequestChannel, TopicCollector},
+};
 use reqwless::{
     client::HttpClient,
     request::{Method, RequestBuilder},
@@ -40,6 +40,60 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Wi-Fi 凭证
 const WIFI_SSID: &str = "HOVER-2.4G";
 const WIFI_PASS: &str = "12345678";
+// MQTT Broker 配置
+const MQTT_BROKER_IP: &str = "101.200.223.8";
+const MQTT_PORT: u16 = 1883;
+const MQTT_CLIENT_ID: &str = "esp32c6-client";
+
+// MQTT 主题定义
+const CMD_TOPIC: &str = "device/cmd";
+const STATE_TOPIC: &str = "device/state";
+
+// ESP32 MQTT 模块
+struct EspMqttModule {
+    pending_state_update: bool,
+}
+
+impl EspMqttModule {
+    fn new() -> Self {
+        Self {
+            pending_state_update: false,
+        }
+    }
+}
+
+impl MqttModule for EspMqttModule {
+    // 注册要订阅的主题
+    fn register(&self, collector: &mut dyn TopicCollector) {
+        collector.add(CMD_TOPIC);
+    }
+
+    // 处理收到的消息
+    fn on_message(&mut self, msg: &Publish<'_>) {
+        if msg.topic == CMD_TOPIC {
+            // 处理命令
+            println!("Received command: {:?}", core::str::from_utf8(msg.payload));
+            self.pending_state_update = true;
+        }
+    }
+
+    // 定期任务
+    fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
+        outbox.publish(STATE_TOPIC, b"online", QoS::AtMostOnce);
+        Duration::from_secs(30)
+    }
+
+    // 检查是否需要立即发布
+    fn needs_immediate_publish(&self) -> bool {
+        self.pending_state_update
+    }
+
+    // 立即发布（在收到命令后）
+    fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+        self.pending_state_update = false;
+        outbox.publish(STATE_TOPIC, b"command_processed", QoS::AtMostOnce);
+    }
+}
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
@@ -49,17 +103,29 @@ macro_rules! mk_static {
     }};
 }
 
-// 网络栈资源池大小
-// const STACK_RESOURCES: StackResources<2> = StackResources::new();
-// #[allow(
-//     clippy::large_stack_frames,
-//     reason = "it's not unusual to allocate larger buffers etc. in main"
-// )]
+#[embassy_executor::task]
+async fn mqtt_task(
+    mut mqtt_runtime: MqttRuntime<'static, TcpTransport<'static>, EspMqttModule, 8, 1024, 8>,
+) {
+    loop {
+        match mqtt_runtime.run().await {
+            Ok(_) => {
+                println!("MQTT runtime completed successfully");
+            }
+            Err(e) => {
+                println!("MQTT runtime error: {:?}", e);
+                // 等待一段时间后重试
+                Timer::after(Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     // generator version: 1.2.0
     // 分配内存
-    esp_alloc::heap_allocator!(size:72 * 1024);
+    esp_alloc::heap_allocator!(size:128  * 1024);
     // 1. 初始化日志
     info!("Starting Wi-Fi + LED demo");
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -111,6 +177,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(connection(controller).unwrap());
     spawner.spawn(net_task(ap_runner).unwrap());
     spawner.spawn(net_task(sta_runner).unwrap());
+
     let sta_address = loop {
         if let Some(config) = sta_stack.config_v4() {
             let address = config.address.address();
@@ -155,7 +222,44 @@ async fn main(spawner: Spawner) -> ! {
         &mut sta_server_tx_buffer,
     );
     sta_server_socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
+    let rx_buffer = mk_static!([u8; 1024], [0; 1024]);
+    let tx_buffer = mk_static!([u8; 1024], [0; 1024]);
 
+    let mut socket = TcpSocket::new(sta_stack, rx_buffer, tx_buffer);
+    socket.set_timeout(Some(Duration::from_secs(15)));
+    // 1️⃣ 构造明确的 SocketAddrV4 并转换为 IpEndpoint
+    let broker_addr = core::net::SocketAddrV4::new(Ipv4Addr::new(175, 27, 135, 250), 1883);
+    let endpoint = embassy_net::IpEndpoint::from(broker_addr);
+
+    // 增加错误打印，避免直接 unwrap
+    match socket.connect(endpoint).await {
+        Ok(()) => println!("TCP已连接到代理"),
+        Err(e) => {
+            println!("TCP connect error: {:?}", e);
+            panic!("Failed to connect to MQTT broker");
+        }
+    }
+    info!("正常");
+    let mqtt_transport = TcpTransport::new(socket, Duration::from_secs(5));
+    // 配置 MQTT 连接选项
+    let mqtt_options = MqttOptions::new("esp32c6-client");
+    // 创建 MQTT 客户端
+    let mqtt_client = MqttClient::<_, 8, 1024>::new(mqtt_transport, mqtt_options);
+
+    // 创建发布请求通道
+    let channel = mk_static!(
+        PublishRequestChannel<'static, 8>,
+        PublishRequestChannel::new()
+    );
+
+    // 创建模块
+    let module = EspMqttModule::new();
+
+    // 创建 MQTT 运行时
+    let mut mqtt_runtime = MqttRuntime::new(mqtt_client, module, channel.receiver());
+
+    // 启动 MQTT 运行时任务
+    spawner.spawn(mqtt_task(mqtt_runtime).unwrap());
     loop {
         println!("Wait for connection...");
         // FIXME: If connections are attempted on both sockets at the same time, we
@@ -300,6 +404,7 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(1000)).await;
         server_socket.abort();
     }
+
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0/examples
 }
 
