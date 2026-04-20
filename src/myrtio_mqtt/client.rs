@@ -6,6 +6,7 @@
 use super::error::{MqttError, ProtocolError};
 use super::packet::{self, Connect, EncodePacket, MqttPacket, PingReq, Publish, QoS, Subscribe};
 use super::transport::{self, MqttTransport};
+use defmt::info;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::{String, Vec};
 
@@ -404,7 +405,6 @@ where
                 futures::future::Either::Right(((), _pending_recv)) => Ok(PollDecision::KeepAlive),
             }
         }?;
-
         match decision {
             PollDecision::Received(n) => {
                 if n == 0 {

@@ -23,6 +23,7 @@ use esp_radio::wifi::{
     Config, ControllerConfig, Interface, WifiController, ap::AccessPointConfig, sta::StationConfig,
 };
 use esp_rtos as _;
+use esp32::mqtt_manager::{MQTT_INCOMING, MqttMessage, mqtt_manager_task};
 use esp32::myrtio_mqtt::{
     MqttOptions, QoS, TcpTransport,
     client::MqttClient,
@@ -171,7 +172,7 @@ async fn main(spawner: Spawner) -> ! {
     let (sta_stack, sta_runner) = embassy_net::new(
         wifi_sta_device,
         sta_config,
-        mk_static!(StackResources<4>, StackResources::<4>::new()),
+        mk_static!(StackResources<8>, StackResources::<8>::new()),
         seed,
     );
     spawner.spawn(connection(controller).unwrap());
@@ -222,44 +223,44 @@ async fn main(spawner: Spawner) -> ! {
         &mut sta_server_tx_buffer,
     );
     sta_server_socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
-    let rx_buffer = mk_static!([u8; 1024], [0; 1024]);
-    let tx_buffer = mk_static!([u8; 1024], [0; 1024]);
+    // let rx_buffer = mk_static!([u8; 1024], [0; 1024]);
+    // let tx_buffer = mk_static!([u8; 1024], [0; 1024]);
 
-    let mut socket = TcpSocket::new(sta_stack, rx_buffer, tx_buffer);
-    socket.set_timeout(Some(Duration::from_secs(15)));
+    // let mut socket = TcpSocket::new(sta_stack, rx_buffer, tx_buffer);
+    // socket.set_timeout(Some(Duration::from_secs(15)));
     // 1️⃣ 构造明确的 SocketAddrV4 并转换为 IpEndpoint
-    let broker_addr = core::net::SocketAddrV4::new(Ipv4Addr::new(175, 27, 135, 250), 1883);
-    let endpoint = embassy_net::IpEndpoint::from(broker_addr);
+    // let broker_addr = core::net::SocketAddrV4::new(Ipv4Addr::new(175, 27, 135, 250), 1883);
+    // let endpoint = embassy_net::IpEndpoint::from(broker_addr);
 
-    // 增加错误打印，避免直接 unwrap
-    match socket.connect(endpoint).await {
-        Ok(()) => println!("TCP已连接到代理"),
-        Err(e) => {
-            println!("TCP connect error: {:?}", e);
-            panic!("Failed to connect to MQTT broker");
-        }
-    }
+    // // 增加错误打印，避免直接 unwrap
+    // match socket.connect(endpoint).await {
+    //     Ok(()) => println!("TCP已连接到代理"),
+    //     Err(e) => {
+    //         println!("TCP connect error: {:?}", e);
+    //         panic!("Failed to connect to MQTT broker");
+    //     }
+    // }
     info!("正常");
-    let mqtt_transport = TcpTransport::new(socket, Duration::from_secs(5));
-    // 配置 MQTT 连接选项
-    let mqtt_options = MqttOptions::new("esp32c6-client");
-    // 创建 MQTT 客户端
-    let mqtt_client = MqttClient::<_, 8, 1024>::new(mqtt_transport, mqtt_options);
+    // let mqtt_transport = TcpTransport::new(socket, Duration::from_secs(5));
+    // // 配置 MQTT 连接选项
+    // let mqtt_options = MqttOptions::new("esp32c6-client");
+    // // 创建 MQTT 客户端
+    // let mqtt_client = MqttClient::<_, 8, 1024>::new(mqtt_transport, mqtt_options);
 
-    // 创建发布请求通道
-    let channel = mk_static!(
-        PublishRequestChannel<'static, 8>,
-        PublishRequestChannel::new()
-    );
+    // // 创建发布请求通道
+    // let channel = mk_static!(
+    //     PublishRequestChannel<'static, 8>,
+    //     PublishRequestChannel::new()
+    // );
 
-    // 创建模块
-    let module = EspMqttModule::new();
+    // // 创建模块
+    // let module = EspMqttModule::new();
 
     // 创建 MQTT 运行时
-    let mut mqtt_runtime = MqttRuntime::new(mqtt_client, module, channel.receiver());
+    // let mut mqtt_runtime = MqttRuntime::new(mqtt_client, module, channel.receiver());
 
     // 启动 MQTT 运行时任务
-    spawner.spawn(mqtt_task(mqtt_runtime).unwrap());
+    spawner.spawn(mqtt_manager_task(sta_stack).unwrap());
     loop {
         println!("Wait for connection...");
         // FIXME: If connections are attempted on both sockets at the same time, we
@@ -415,39 +416,45 @@ async fn connection(mut controller: WifiController<'static>) {
     loop {
         match controller.connect_async().await {
             Ok(_) => {
+                println!("WiFi已连接，启动RSSI监视器.");
+                // 创建一个定时器，每10秒触发一次
+                let mut ticker = embassy_time::Ticker::every(Duration::from_secs(10));
+
                 // wait until we're no longer connected
                 loop {
-                    let info = embassy_futures::select::select(
+                    let either = embassy_futures::select::select3(
                         controller.wait_for_disconnect_async(),
                         controller.wait_for_access_point_connected_event_async(),
+                        ticker.next(),
                     )
                     .await;
 
-                    match info {
-                        Either::First(station_disconnected) => {
-                            if let Ok(station_disconnected) = station_disconnected {
-                                println!("Station disconnected: {:?}", station_disconnected);
-                                break;
+                    match either {
+                        // 定时器到期，打印RSSI
+                        embassy_futures::select::Either3::Third(_) => match controller.rssi() {
+                            Ok(rssi) => println!("Current WiFi RSSI: {} dBm", rssi),
+                            Err(e) => println!("Failed to get RSSI: {:?}", e),
+                        },
+                        // 处理断开事件
+                        embassy_futures::select::Either3::First(station_disconnected) => {
+                            if let Ok(info) = station_disconnected {
+                                println!("Station disconnected: {:?}", info);
+                                break; // 退出内循环，重新连接
                             }
                         }
-                        Either::Second(event) => {
+                        // 处理AP连接事件（保持原逻辑）
+                        embassy_futures::select::Either3::Second(event) => {
                             if let Ok(event) = event {
                                 match event {
                                     esp_radio::wifi::AccessPointStationEventInfo::Connected(
-                                        access_point_station_connected_info,
+                                        info,
                                     ) => {
-                                        println!(
-                                            "Station connected: {:?}",
-                                            access_point_station_connected_info
-                                        );
+                                        println!("Station connected: {:?}", info);
                                     }
                                     esp_radio::wifi::AccessPointStationEventInfo::Disconnected(
-                                        access_point_station_disconnected_info,
+                                        info,
                                     ) => {
-                                        println!(
-                                            "Station disconnected: {:?}",
-                                            access_point_station_disconnected_info
-                                        );
+                                        println!("Station disconnected: {:?}", info);
                                     }
                                 }
                             }

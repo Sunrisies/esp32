@@ -9,6 +9,7 @@ use super::error::{MqttError, ProtocolError};
 use super::transport;
 use super::util::{self, read_utf8_string, write_utf8_string};
 use core::marker::PhantomData;
+use defmt::info;
 use heapless::Vec;
 
 // Conditionally import v5-specific utilities only when the feature is enabled.
@@ -44,6 +45,7 @@ pub trait DecodePacket<'a>: Sized {
 
 /// An enumeration of all possible MQTT control packets.
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))] // 添加这一行
 pub enum MqttPacket<'a> {
     Connect(Connect<'a>),
     ConnAck(ConnAck<'a>),
@@ -67,8 +69,10 @@ where
     if buf.is_empty() {
         return Ok(None);
     }
-
     let packet_type = buf[0] >> 4;
+    info!("---------------");
+    info!("packet_type:{}", packet_type);
+
     let packet = match packet_type {
         1 => MqttPacket::Connect(
             Connect::decode(buf, version).map_err(MqttError::cast_transport_error)?,
