@@ -70,7 +70,7 @@ where
         return Ok(None);
     }
     let packet_type = buf[0] >> 4;
-    info!("---------------");
+    // info!("---------------");
     info!("packet_type:{}", packet_type);
 
     let packet = match packet_type {

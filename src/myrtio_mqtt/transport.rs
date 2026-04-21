@@ -93,6 +93,7 @@ impl<'a> TcpTransport<'a> {
             futures::future::Either::Right(((), _)) => {
                 #[cfg(feature = "esp32-log")]
                 esp_println::println!("TCP read timeout!");
+                info!("--------1111---------");
 
                 Err(MqttError::Timeout)
             }
