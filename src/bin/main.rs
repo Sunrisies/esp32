@@ -104,24 +104,6 @@ macro_rules! mk_static {
     }};
 }
 
-#[embassy_executor::task]
-async fn mqtt_task(
-    mut mqtt_runtime: MqttRuntime<'static, TcpTransport<'static>, EspMqttModule, 8, 1024, 8>,
-) {
-    loop {
-        match mqtt_runtime.run().await {
-            Ok(_) => {
-                println!("MQTT runtime completed successfully");
-            }
-            Err(e) => {
-                println!("MQTT runtime error: {:?}", e);
-                // 等待一段时间后重试
-                Timer::after(Duration::from_secs(5)).await;
-            }
-        }
-    }
-}
-
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     // generator version: 1.2.0

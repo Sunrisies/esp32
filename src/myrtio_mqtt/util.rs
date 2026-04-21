@@ -3,6 +3,12 @@
 //! This module provides helper functions for reading and writing MQTT-specific data types
 //! from and to byte buffers, such as variable-byte integers and length-prefixed strings.
 
+#[cfg(feature = "v5")]
+use heapless::Vec;
+
+#[cfg(feature = "v5")]
+use crate::myrtio_mqtt::packet;
+
 use super::error::{MqttError, ProtocolError};
 use super::transport;
 
@@ -170,7 +176,11 @@ pub fn write_properties(
 
     // Write the actual property length
     let mut temp_cursor = prop_len_cursor_start;
-    let _ = crate::util::write_variable_byte_integer(&mut temp_cursor, buf, total_prop_len)?;
+    let _ = crate::myrtio_mqtt::util::write_variable_byte_integer(
+        &mut temp_cursor,
+        buf,
+        total_prop_len,
+    )?;
 
     Ok(())
 }

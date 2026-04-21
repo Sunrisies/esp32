@@ -175,7 +175,7 @@
 // src/mqtt_manager.rs
 #![allow(dead_code)]
 use crate::myrtio_mqtt::{
-    self, LastWill, MqttEvent, MqttOptions, QoS, TcpTransport, client::MqttClient, packet::Publish,
+    LastWill, MqttEvent, MqttOptions, QoS, TcpTransport, client::MqttClient, packet::Publish,
 };
 use core::str;
 
@@ -372,6 +372,8 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
 
         // 内层循环：运行逻辑
         loop {
+            // 定义一个变量来存储待发送的响应，初始为 None
+            let mut pending_response: Option<&str> = None;
             match client.poll().await {
                 Ok(Some(MqttEvent::Publish(publish))) => {
                     info!(
@@ -379,19 +381,30 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
                         publish.topic, publish.payload
                     );
 
-                    // 使用处理器管理器处理消息
+                    // 处理消息，将结果存入 pending_response
                     if let Some(response) = handler_manager.process(&publish) {
-                        // 回复状态
-                        let _ = client
-                            .publish(TOPIC_STATE, response.as_bytes(), QoS::AtLeastOnce)
-                            .await;
+                        pending_response = Some(response);
                     }
+                    // 使用处理器管理器处理消息
+                    // if let Some(response) = handler_manager.process(&publish) {
+                    //     // 回复状态
+                    //     let _ = client
+                    //         .publish(TOPIC_STATE, response.as_bytes(), QoS::AtLeastOnce)
+                    //         .await;
+                    // }
                 }
                 Ok(None) => {}
                 Err(e) => {
                     println!("[MQTT] Poll error: {:?}, reconnecting...", e);
                     break; // 跳出内层，触发重连
                 }
+            }
+            info!("------------{}", pending_response);
+            // 在 match 借用结束后，执行发布
+            if let Some(response) = pending_response {
+                let _ = client
+                    .publish(TOPIC_STATE, response.as_bytes(), QoS::AtLeastOnce)
+                    .await;
             }
         }
     }

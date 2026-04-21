@@ -65,3 +65,7 @@ version = "0.3.30"
 default-features = false
 [dependencies.embassy-sync]
 version = "0.7.2"
+[features]
+default = ["esp32-log", 'v5']
+esp32-log = []
+v5 = []

@@ -14,7 +14,7 @@ use heapless::Vec;
 
 // Conditionally import v5-specific utilities only when the feature is enabled.
 #[cfg(feature = "v5")]
-use crate::util::{read_properties, write_properties};
+use crate::myrtio_mqtt::util::{read_properties, write_properties};
 
 /// Represents the Quality of Service (QoS) levels for MQTT messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
@@ -345,7 +345,7 @@ pub struct ConnAck<'a> {
 impl<'a> DecodePacket<'a> for ConnAck<'a> {
     fn decode(
         buf: &'a [u8],
-        _version: MqttVersion,
+        version: MqttVersion,
     ) -> Result<Self, MqttError<transport::ErrorPlaceHolder>> {
         let mut cursor = 2;
         let session_present = (buf[cursor] & 0x01) != 0;
@@ -412,7 +412,7 @@ impl<'a> DecodePacket<'a> for Publish<'a> {
 
         #[cfg(feature = "v5")]
         let properties = if _version == MqttVersion::V5 {
-            crate::util::read_properties(&mut cursor, buf)?
+            crate::myrtio_mqtt::util::read_properties(&mut cursor, buf)?
         } else {
             Vec::new()
         };
@@ -602,7 +602,7 @@ impl<'a> DecodePacket<'a> for SubAck<'a> {
 
         #[cfg(feature = "v5")]
         let properties = if _version == MqttVersion::V5 {
-            crate::util::read_properties(&mut cursor, buf)?
+            crate::myrtio_mqtt::util::read_properties(&mut cursor, buf)?
         } else {
             Vec::new()
         };
