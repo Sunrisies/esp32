@@ -41,14 +41,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Wi-Fi 凭证
 const WIFI_SSID: &str = "HOVER-2.4G";
 const WIFI_PASS: &str = "12345678";
-// MQTT Broker 配置
-const MQTT_BROKER_IP: &str = "101.200.223.8";
-const MQTT_PORT: u16 = 1883;
-const MQTT_CLIENT_ID: &str = "esp32c6-client";
-
-// MQTT 主题定义
-const CMD_TOPIC: &str = "device/cmd";
-const STATE_TOPIC: &str = "device/state";
 
 // ESP32 MQTT 模块
 struct EspMqttModule {
