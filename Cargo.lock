@@ -784,9 +784,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal"
-version = "1.1.0-rc.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3599174af043c640b89d5950558bc40bd448f6e1d56ae43880a0d8530b4f82c"
+checksum = "2bfcf2a0842903717f4663f6a08512c32b0f6b2d7fb7db3c8a6895d2e6d49f72"
 dependencies = [
  "bitfield",
  "bitflags 2.11.1",
@@ -1010,6 +1010,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "defmt 1.0.1",
+ "document-features",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
@@ -1027,7 +1028,9 @@ dependencies = [
  "heapless 0.9.2",
  "log",
  "reqwless",
+ "rgb",
  "smart-leds",
+ "smart-leds-trait",
  "static_cell",
 ]
 
@@ -1742,6 +1745,9 @@ name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "riscv"

@@ -9,11 +9,7 @@ name = "esp32"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-hal = { version = "1.1.0-rc.0", features = [
-    "esp32c6",
-    "unstable",
-    "defmt",
-] }
+esp-hal = { version = "1.1.1", features = ["esp32c6", "unstable", "defmt"] }
 
 
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["defmt", "esp32c6"] }
@@ -46,6 +42,7 @@ static_cell = "2.1.1"
 reqwless = { version = "0.14.0", default-features = false }
 heapless = "0.9.2"
 
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
@@ -69,3 +66,12 @@ version = "0.7.2"
 default = ["esp32-log", 'v5']
 esp32-log = []
 v5 = []
+
+[dependencies.rgb]
+version = "0.8.52"
+
+[dependencies.smart-leds-trait]
+version = "^0.3.2"
+
+[dependencies.document-features]
+version = "^0.2.12"

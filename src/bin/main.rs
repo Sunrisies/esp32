@@ -12,28 +12,37 @@ use embassy_net::{
         client::{TcpClient, TcpClientState},
     },
 };
-use embassy_time::{Duration, Timer};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Read;
 use esp_alloc as _;
 use esp_backtrace as _;
-use esp_hal::{clock::CpuClock, rng::Rng};
+use esp_hal::{clock::CpuClock, gpio::Output, rmt::Rmt, rng::Rng, time::Rate};
 use esp_println as _;
 use esp_println::{print, println};
 use esp_radio::wifi::{
     Config, ControllerConfig, Interface, WifiController, ap::AccessPointConfig, sta::StationConfig,
 };
 use esp_rtos as _;
-use esp32::mqtt_manager::{MQTT_INCOMING, MqttMessage, mqtt_manager_task};
-use esp32::myrtio_mqtt::{
-    MqttOptions, QoS, TcpTransport,
-    client::MqttClient,
-    packet::Publish,
-    runtime::{MqttModule, MqttRuntime, PublishOutbox, PublishRequestChannel, TopicCollector},
+use esp32::{
+    mqtt_manager::{MQTT_INCOMING, MqttMessage, mqtt_manager_task},
+    smart_led_buffer,
+};
+use esp32::{
+    myrtio_mqtt::{
+        MqttOptions, QoS, TcpTransport,
+        client::MqttClient,
+        packet::Publish,
+        runtime::{MqttModule, MqttRuntime, PublishOutbox, PublishRequestChannel, TopicCollector},
+    },
+    ws2812::SmartLedsAdapter,
 };
 use reqwless::{
     client::HttpClient,
     request::{Method, RequestBuilder},
 };
+use smart_leds::SmartLedsWrite;
+use smart_leds::{RGB8, SmartLedsWrite as _};
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -41,52 +50,54 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // Wi-Fi 凭证
 const WIFI_SSID: &str = "HOVER-2.4G";
 const WIFI_PASS: &str = "12345678";
+type ColorCommand = heapless::String<32>;
+static COLOR_CHANNEL: Channel<CriticalSectionRawMutex, ColorCommand, 2> = Channel::new();
+// // ESP32 MQTT 模块
+// struct EspMqttModule {
+//     pending_state_update: bool,
+// }
 
-// ESP32 MQTT 模块
-struct EspMqttModule {
-    pending_state_update: bool,
-}
+// impl EspMqttModule {
+//     fn new() -> Self {
+//         Self {
+//             pending_state_update: false,
+//         }
+//     }
+// }
 
-impl EspMqttModule {
-    fn new() -> Self {
-        Self {
-            pending_state_update: false,
-        }
-    }
-}
+// impl MqttModule for EspMqttModule {
+//     // 注册要订阅的主题
+//     fn register(&self, collector: &mut dyn TopicCollector) {
+//         collector.add(CMD_TOPIC);
+//     }
 
-impl MqttModule for EspMqttModule {
-    // 注册要订阅的主题
-    fn register(&self, collector: &mut dyn TopicCollector) {
-        collector.add(CMD_TOPIC);
-    }
+//     // 处理收到的消息
+//     fn on_message(&mut self, msg: &Publish<'_>) {
+//         if msg.topic == CMD_TOPIC {
+//             // 处理命令
+//             println!("Received command: {:?}", core::str::from_utf8(msg.payload));
+//             self.pending_state_update = true;
+//         }
+//     }
 
-    // 处理收到的消息
-    fn on_message(&mut self, msg: &Publish<'_>) {
-        if msg.topic == CMD_TOPIC {
-            // 处理命令
-            println!("Received command: {:?}", core::str::from_utf8(msg.payload));
-            self.pending_state_update = true;
-        }
-    }
+//     // 定期任务
+//     fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
+//         outbox.publish(STATE_TOPIC, b"online", QoS::AtMostOnce);
+//         Duration::from_secs(30)
+//     }
 
-    // 定期任务
-    fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
-        outbox.publish(STATE_TOPIC, b"online", QoS::AtMostOnce);
-        Duration::from_secs(30)
-    }
+//     // 检查是否需要立即发布
+//     fn needs_immediate_publish(&self) -> bool {
+//         self.pending_state_update
+//     }
 
-    // 检查是否需要立即发布
-    fn needs_immediate_publish(&self) -> bool {
-        self.pending_state_update
-    }
+//     // 立即发布（在收到命令后）
+//     fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+//         self.pending_state_update = false;
+//         outbox.publish(STATE_TOPIC, b"command_processed", QoS::AtMostOnce);
+//     }
+// }
 
-    // 立即发布（在收到命令后）
-    fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
-        self.pending_state_update = false;
-        outbox.publish(STATE_TOPIC, b"command_processed", QoS::AtMostOnce);
-    }
-}
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
@@ -105,6 +116,10 @@ async fn main(spawner: Spawner) -> ! {
     info!("Starting Wi-Fi + LED demo");
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let p = esp_hal::init(config);
+    // 在 main 中，完成 esp_hal::init 后
+    let rmt = p.RMT; // 注意：RMT 外设需要从 peripherals 中取出
+    let pin = p.GPIO8;
+
     // ✅ 先启动 esp_rtos
     let timg0 = esp_hal::timer::timg::TimerGroup::new(p.TIMG0);
     let sw_int = esp_hal::interrupt::software::SoftwareInterruptControl::new(p.SW_INTERRUPT);
@@ -152,6 +167,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(connection(controller).unwrap());
     spawner.spawn(net_task(ap_runner).unwrap());
     spawner.spawn(net_task(sta_runner).unwrap());
+    spawner.spawn(led_control_task(rmt, pin).unwrap());
 
     let sta_address = loop {
         if let Some(config) = sta_stack.config_v4() {
@@ -447,4 +463,78 @@ async fn connection(mut controller: WifiController<'static>) {
 #[embassy_executor::task(pool_size = 2)]
 async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
     runner.run().await
+}
+
+// #[embassy_executor::task]
+
+// async fn led_control_task(
+//     rmt_peripheral: esp_hal::peripherals::RMT<'static>,
+//     pin: esp_hal::peripherals::GPIO8<'static>,
+// ) {
+//     let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
+//     let mut buffer = smart_led_buffer!(1);
+//     let mut led = SmartLedsAdapter::new(rmt.channel0, pin, &mut buffer);
+//     let mut current_color = RGB8::default();
+//     led.write([current_color].into_iter()).unwrap();
+
+//     loop {
+//         info!("led_control_task");
+//         let cmd_str = COLOR_CHANNEL.receive().await;
+//         let rgb = parse_color_str(&cmd_str); // 自定义解析
+//         if let Some(rgb) = rgb {
+//             current_color = rgb;
+//             let _ = led.write([current_color].into_iter());
+//         }
+//     }
+// }
+
+#[embassy_executor::task]
+async fn led_control_task(
+    rmt_peripheral: esp_hal::peripherals::RMT<'static>,
+    pin: esp_hal::peripherals::GPIO8<'static>,
+) {
+    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
+    let mut buffer = smart_led_buffer!(1);
+    let mut led = SmartLedsAdapter::new(rmt.channel0, pin, &mut buffer);
+    const LEVEL: u8 = 10;
+    let mut color = RGB8::default();
+    color.r = LEVEL;
+    loop {
+        info!("Hello world!");
+        led.write([color].into_iter()).unwrap();
+        let delay_start = Instant::now();
+        while delay_start.elapsed() < Duration::from_millis(1000) {}
+        let tmp = color.r;
+        color.r = color.b;
+        color.b = color.g;
+        color.g = tmp;
+    }
+    // let colors = [
+    //     RGB8 { r: 50, g: 0, b: 0 }, // 红
+    //     RGB8 { r: 0, g: 50, b: 0 }, // 绿
+    //     RGB8 { r: 0, g: 0, b: 50 }, // 蓝
+    // ];
+    // let mut idx = 0;
+    // loop {
+    //     let color = colors[idx % 3];
+    //     let _ = led.write([color].into_iter());
+    //     info!(
+    //         "LED color changed to R: {}, G: {}, B: {}",
+    //         color.r, color.g, color.b
+    //     );
+    //     idx += 1;
+    //     Timer::after(Duration::from_millis(1000)).await;
+    // }
+}
+fn parse_color_str(s: &str) -> Option<RGB8> {
+    // 解析 "R,G,B" 格式
+    let parts: heapless::Vec<_, 3> = s.split(',').collect();
+    if parts.len() == 3 {
+        let r = parts[0].parse().ok()?;
+        let g = parts[1].parse().ok()?;
+        let b = parts[2].parse().ok()?;
+        Some(RGB8 { r, g, b })
+    } else {
+        None
+    }
 }
