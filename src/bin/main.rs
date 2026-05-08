@@ -3,7 +3,7 @@
 use core::net::Ipv4Addr;
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::select::Either;
+use embassy_futures::select::{Either, select};
 use embassy_net::{
     IpListenEndpoint, Ipv4Cidr, Runner, StackResources, StaticConfigV4,
     dns::DnsSocket,
@@ -487,44 +487,55 @@ async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
 //         }
 //     }
 // }
-
 #[embassy_executor::task]
 async fn led_control_task(
     rmt_peripheral: esp_hal::peripherals::RMT<'static>,
     pin: esp_hal::peripherals::GPIO8<'static>,
 ) {
-    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(80)).unwrap();
+    let rmt = Rmt::new(rmt_peripheral, Rate::from_mhz(40)).unwrap();
     let mut buffer = smart_led_buffer!(1);
     let mut led = SmartLedsAdapter::new(rmt.channel0, pin, &mut buffer);
-    const LEVEL: u8 = 10;
-    let mut color = RGB8::default();
-    color.r = LEVEL;
+    let mut current_color = RGB8::default();
+    led.write([current_color].into_iter()).unwrap();
+
+    let colors = [
+        RGB8 { r: 50, g: 0, b: 0 },
+        RGB8 { r: 0, g: 50, b: 0 },
+        RGB8 { r: 0, g: 0, b: 50 },
+    ];
+    let mut auto_idx = 0;
+    let mut auto_interval = Duration::from_millis(1000);
+
     loop {
-        info!("Hello world!");
-        led.write([color].into_iter()).unwrap();
-        let delay_start = Instant::now();
-        while delay_start.elapsed() < Duration::from_millis(1000) {}
-        let tmp = color.r;
-        color.r = color.b;
-        color.b = color.g;
-        color.g = tmp;
+        // 等待信道消息，或自动变色定时器触发
+        let timer_fut = Timer::after(auto_interval);
+        let recv_fut = COLOR_CHANNEL.receive();
+        match select(recv_fut, timer_fut).await {
+            Either::First(cmd_str) => {
+                // 收到 MQTT 命令
+                if let Some(rgb) = parse_color_str(&cmd_str) {
+                    current_color = rgb;
+                    let _ = led.write([current_color].into_iter());
+                    info!(
+                        "LED color changed to R: {}, G: {}, B: {}",
+                        current_color.r, current_color.g, current_color.b
+                    );
+                }
+                // 重置自动索引（可选）
+                auto_idx = 0;
+            }
+            Either::Second(()) => {
+                // 定时器到期，自动切换颜色
+                current_color = colors[auto_idx % 3];
+                let _ = led.write([current_color].into_iter());
+                info!(
+                    "LED color changed to R: {}, G: {}, B: {}",
+                    current_color.r, current_color.g, current_color.b
+                );
+                auto_idx += 1;
+            }
+        }
     }
-    // let colors = [
-    //     RGB8 { r: 50, g: 0, b: 0 }, // 红
-    //     RGB8 { r: 0, g: 50, b: 0 }, // 绿
-    //     RGB8 { r: 0, g: 0, b: 50 }, // 蓝
-    // ];
-    // let mut idx = 0;
-    // loop {
-    //     let color = colors[idx % 3];
-    //     let _ = led.write([color].into_iter());
-    //     info!(
-    //         "LED color changed to R: {}, G: {}, B: {}",
-    //         color.r, color.g, color.b
-    //     );
-    //     idx += 1;
-    //     Timer::after(Duration::from_millis(1000)).await;
-    // }
 }
 fn parse_color_str(s: &str) -> Option<RGB8> {
     // 解析 "R,G,B" 格式
