@@ -24,6 +24,7 @@ use esp_radio::wifi::{
     Config, ControllerConfig, Interface, WifiController, ap::AccessPointConfig, sta::StationConfig,
 };
 use esp_rtos as _;
+use esp32::mqtt_manager::COLOR_CHANNEL;
 use esp32::{
     mqtt_manager::{MQTT_INCOMING, MqttMessage, mqtt_manager_task},
     smart_led_buffer,
@@ -51,7 +52,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const WIFI_SSID: &str = "HOVER-2.4G";
 const WIFI_PASS: &str = "12345678";
 type ColorCommand = heapless::String<32>;
-static COLOR_CHANNEL: Channel<CriticalSectionRawMutex, ColorCommand, 2> = Channel::new();
 // // ESP32 MQTT 模块
 // struct EspMqttModule {
 //     pending_state_update: bool,
@@ -487,6 +487,7 @@ async fn net_task(mut runner: Runner<'static, Interface<'static>>) {
 //         }
 //     }
 // }
+
 #[embassy_executor::task]
 async fn led_control_task(
     rmt_peripheral: esp_hal::peripherals::RMT<'static>,
@@ -498,21 +499,23 @@ async fn led_control_task(
     let mut current_color = RGB8::default();
     led.write([current_color].into_iter()).unwrap();
 
+    // 自动循环的颜色列表
     let colors = [
-        RGB8 { r: 50, g: 0, b: 0 },
-        RGB8 { r: 0, g: 50, b: 0 },
-        RGB8 { r: 0, g: 0, b: 50 },
+        RGB8 { r: 50, g: 0, b: 0 }, // 红
+        RGB8 { r: 0, g: 50, b: 0 }, // 绿
+        RGB8 { r: 0, g: 0, b: 50 }, // 蓝
     ];
     let mut auto_idx = 0;
-    let mut auto_interval = Duration::from_millis(1000);
+    let mut command_until = Instant::now(); // 命令有效截止时间（初始为过去）
+    let check_interval = Duration::from_millis(500); // 每 500ms 检查一次，保证及时恢复
 
     loop {
-        // 等待信道消息，或自动变色定时器触发
-        let timer_fut = Timer::after(auto_interval);
+        let timer_fut = Timer::after(check_interval);
         let recv_fut = COLOR_CHANNEL.receive();
+
         match select(recv_fut, timer_fut).await {
             Either::First(cmd_str) => {
-                // 收到 MQTT 命令
+                // 收到 MQTT 命令，解析并立即设置颜色
                 if let Some(rgb) = parse_color_str(&cmd_str) {
                     current_color = rgb;
                     let _ = led.write([current_color].into_iter());
@@ -520,25 +523,31 @@ async fn led_control_task(
                         "LED color changed to R: {}, G: {}, B: {}",
                         current_color.r, current_color.g, current_color.b
                     );
+                    // 设定命令保持期：从现在起 3 秒内不自动切换
+                    command_until = Instant::now() + Duration::from_secs(3);
                 }
-                // 重置自动索引（可选）
-                auto_idx = 0;
+                // auto_idx 不重置，保持原进度（也可重置为0，根据需求）
             }
             Either::Second(()) => {
-                // 定时器到期，自动切换颜色
-                current_color = colors[auto_idx % 3];
-                let _ = led.write([current_color].into_iter());
-                info!(
-                    "LED color changed to R: {}, G: {}, B: {}",
-                    current_color.r, current_color.g, current_color.b
-                );
-                auto_idx += 1;
+                // 定时器触发，检查是否已过命令保持期
+                if Instant::now() >= command_until {
+                    // 命令保持期已过，执行自动切换
+                    current_color = colors[auto_idx % 3];
+                    let _ = led.write([current_color].into_iter());
+                    info!(
+                        "LED color changed to R: {}, G: {}, B: {}",
+                        current_color.r, current_color.g, current_color.b
+                    );
+                    auto_idx += 1;
+                }
+                // 如果还在命令保持期内，什么都不做（颜色保持不变）
             }
         }
     }
 }
+
+// 解析颜色字符串，支持 "R,G,B" 格式，如 "255,0,0"
 fn parse_color_str(s: &str) -> Option<RGB8> {
-    // 解析 "R,G,B" 格式
     let parts: heapless::Vec<_, 3> = s.split(',').collect();
     if parts.len() == 3 {
         let r = parts[0].parse().ok()?;
