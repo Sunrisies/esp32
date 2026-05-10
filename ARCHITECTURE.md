@@ -48,7 +48,15 @@
 - `src/ws2812.rs`
   - WS2812 / RMT 适配器
 - `src/bin/main.rs`
-  - Wi-Fi、HTTP、MQTT、LED 的入口整合
+  - 启动顺序、静态资源分配和任务编排
+- `src/bin/app/wifi.rs`
+  - Wi-Fi AP/STA 初始化、网络栈 runner、连接监控
+- `src/bin/app/http.rs`
+  - HTTP 监听、请求读取、上游 HTTP 客户端转发
+- `src/bin/app/mqtt.rs`
+  - MQTT manager 任务启动封装
+- `src/bin/app/led.rs`
+  - LED 控制任务和颜色命令解析
 
 ## 数据流
 
@@ -56,7 +64,7 @@
 2. `packet.rs` 将字节流编码或解码为 MQTT 包。
 3. `client.rs` 维护连接状态、订阅、发布和 keep-alive。
 4. `runtime/` 负责把 MQTT 消息分发给 `MqttModule`，并把模块产生的发布请求送回客户端。
-5. `bin/main.rs` 负责把外设、网络和业务逻辑串起来。
+5. `bin/main.rs` 负责启动编排，`src/bin/app/` 下的模块分别承载 Wi-Fi、HTTP、MQTT 和 LED 控制。
 
 ## 当前运行时 API
 

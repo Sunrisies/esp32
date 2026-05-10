@@ -4,7 +4,11 @@
 
 ## 主要内容
 
-- `src/bin/main.rs`：设备入口，负责网络初始化、HTTP 服务和 LED 演示
+- `src/bin/main.rs`：设备入口，只保留启动顺序、静态资源分配和任务编排
+- `src/bin/app/wifi.rs`：Wi-Fi AP/STA 初始化、网络栈 runner、连接监控
+- `src/bin/app/http.rs`：HTTP 监听、请求读取、到 httpbin 的转发演示
+- `src/bin/app/mqtt.rs`：MQTT manager 任务启动封装
+- `src/bin/app/led.rs`：WS2812 LED 控制任务
 - `src/myrtio_mqtt/`：可复用的 MQTT 客户端与运行时
 - `src/ws2812.rs`：RMT 驱动的智能灯带适配器
 - `examples/`：可编译示例，演示 MQTT 模块化用法

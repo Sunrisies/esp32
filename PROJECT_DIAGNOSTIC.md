@@ -19,6 +19,10 @@
 #### 入口模块
 
 - `src/bin/main.rs`
+- `src/bin/app/wifi.rs`
+- `src/bin/app/http.rs`
+- `src/bin/app/mqtt.rs`
+- `src/bin/app/led.rs`
 - `build.rs`
 
 #### 业务逻辑模块
@@ -40,9 +44,8 @@
 
 1. `src/myrtio_mqtt/runtime/event_loop.rs` 被导出为 `MqttRuntime`，但 `run()` 主体基本被注释掉并直接返回 `Ok(())`，运行时功能实际不可用。
 2. `src/myrtio_mqtt/runtime/runtime.rs` 和 `src/myrtio_mqtt/runtime/module.rs` 是未挂载的旧实现，且与 `traits.rs` / `event_loop.rs` 存在重复设计。
-3. `src/bin/main.rs` 同时承担 Wi-Fi 初始化、HTTP 服务、MQTT 启动、LED 控制和演示代码，入口模块过重。
-4. `src/mqtt_mini.rs` 为空且未挂载，`MQTT_INCOMING`、`MqttMessage`、`ColorCommand` 等符号未实际使用。
-5. `ARCHITECTURE.md` 描述的 `runtime.rs` / `module.rs` 与当前 `mod.rs` 实际导出的 `event_loop.rs` / `traits.rs` 不一致。
+3. `src/mqtt_mini.rs` 为空且未挂载，`MQTT_INCOMING`、`MqttMessage` 等符号未实际使用。
+4. Wi-Fi 凭据和 MQTT broker 地址仍在源码中，配置边界还需要继续收敛。
 
 ## Cargo.toml 诊断
 
@@ -87,38 +90,36 @@
 2. `src/myrtio_mqtt/runtime/event_loop.rs`: 多个 import 未使用，`client` 和 `publisher_rx` 字段未读，`drain_outbox` 未使用。
 3. `src/myrtio_mqtt/mod.rs` 和 `src/ws2812.rs`: `no_std` 等 crate-level 属性放在非 crate root 模块中。
 4. `src/ws2812.rs`: `rgb::ComponentSlice` 和 `as_slice` 已废弃。
-5. `src/bin/main.rs`: 多个未使用 import，`ColorCommand` 未使用。
+5. `src/mqtt_manager.rs`: `topic` 参数未使用，并存在不必要的 `mut`。
 
 ### Clippy 建议
 
 1. `src/mqtt_manager.rs`: `static mut` 缓冲区立即解引用，建议改为 `StaticCell` 或明确的单例缓冲管理。
 2. `src/myrtio_mqtt/util.rs`: `write_properties` 中存在 unit let-binding，应直接调用表达式。
-3. `src/bin/main.rs`: `mk_static` 宏调用中存在不必要括号，并伴随大量未使用导入，应运行 `cargo clippy --fix` 后人工复核。
+3. `src/myrtio_mqtt/runtime/event_loop.rs`: 大量字段、常量和 import 未使用，根因是 `MqttRuntime::run` 仍未实现。
 
 ### 潜在的内存/性能风险
 
 1. `src/mqtt_manager.rs` 使用 `static mut RX_BUFFER/TX_BUFFER` 加 `unsafe` 可变借用，在异步重连和未来任务扩展下风险较高。
-2. `src/bin/main.rs` 使用 `from_utf8_unchecked` 解析 HTTP 请求，且 `pos` 累加逻辑未按偏移写入缓冲，存在无效 UTF-8 和越界风险。
-3. `src/bin/main.rs`、`src/myrtio_mqtt/client.rs`、`src/mqtt_manager.rs` 存在多个 1024 至 4096 字节栈缓冲，嵌入式环境下需核算任务栈。
-4. `src/myrtio_mqtt/client.rs` 在等待 `PUBACK` / `SUBACK` 时跳过 `Publish` 包，可能丢失并发到达的业务消息。
-5. `src/myrtio_mqtt/runtime/publisher.rs` 的 `BufferedOutbox` 在容量不足或 payload 过大时静默丢弃发布请求。
+2. `src/bin/app/http.rs`、`src/myrtio_mqtt/client.rs`、`src/mqtt_manager.rs` 存在多个 1024 至 4096 字节栈缓冲，嵌入式环境下需核算任务栈。
+3. `src/myrtio_mqtt/client.rs` 在等待 `PUBACK` / `SUBACK` 时跳过 `Publish` 包，可能丢失并发到达的业务消息。
+4. `src/myrtio_mqtt/runtime/publisher.rs` 的 `BufferedOutbox` 在容量不足或 payload 过大时静默丢弃发布请求。
 
 ### 文档覆盖率
 
 - `src/myrtio_mqtt` 和 `src/ws2812.rs` 文档较多。
 - `src/lib.rs` 缺少 crate-level 文档。
 - `src/mqtt_manager.rs` 的 public 类型和静态通道缺少说明。
-- `README.md` 内容过少。
-- `ARCHITECTURE.md` 与代码现状不一致。
-- 测试和 examples 目录缺失。
+- `README.md` 和 `ARCHITECTURE.md` 已同步到当前入口拆分结构。
+- `examples/` 已补充可编译示例，但测试目录仍缺失。
 
 ## 行动清单
 
 | 优先级 | 行动内容 | 建议负责人/时间 |
 | --- | --- | --- |
 | 高 | 修复 `MqttRuntime::run` 的真实实现，统一保留 `event_loop.rs` 或 `runtime.rs` 其中一套，并删除未挂载旧文件 | 建议本周完成 |
-| 高 | 移除 `static mut` 和 `from_utf8_unchecked`，改用 `StaticCell`、受控缓冲和安全 UTF-8 解析 | 建议本周完成 |
+| 高 | 移除 `src/mqtt_manager.rs` 中的 `static mut`，改用 `StaticCell` 或受控缓冲 | 建议本周完成 |
 | 高 | 将 Wi-Fi SSID、密码和 MQTT broker 地址从源码迁出到构建配置或设备配置区 | 建议本周完成 |
 | 中 | 清理 Cargo features，补充 `defmt` feature，评估 `v5` 是否默认启用，并移除未使用依赖 | 建议下个迭代 |
 | 中 | 为 MQTT packet 编解码、`PUBACK` / `SUBACK`、buffer 边界和 `TopicRegistry` 增加最小测试集 | 建议下个迭代 |
-| 中 | 拆分 `src/bin/main.rs`，将 Wi-Fi、HTTP、MQTT、LED 控制拆成独立模块 | 建议下个迭代 |
+| 中 | 已完成：拆分 `src/bin/main.rs`，将 Wi-Fi、HTTP、MQTT、LED 控制拆成 `src/bin/app/` 独立模块 | 2026-05-12 已完成 |
