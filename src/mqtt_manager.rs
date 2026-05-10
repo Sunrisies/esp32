@@ -10,10 +10,12 @@ use heapless::{String, Vec};
 use core::net::{Ipv4Addr, SocketAddrV4};
 use embassy_net::{IpEndpoint, Stack, tcp::TcpSocket};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Timer};
 use esp_println::println;
-
+pub static COLOR_CHANNEL: Channel<CriticalSectionRawMutex, heapless::String<32>, 2> =
+    Channel::new();
 // 配置常量
 const MQTT_BROKER_IP: Ipv4Addr = Ipv4Addr::new(175, 27, 135, 250);
 const MQTT_PORT: u16 = 1883;
@@ -54,7 +56,8 @@ impl MessageHandler for CmdHandler {
 
     fn handle(&self, _topic: &str, payload: &[u8]) -> Option<&'static str> {
         if let Ok(cmd) = str::from_utf8(payload) {
-            match cmd.trim() {
+            let trimmed = cmd.trim();
+            match trimmed {
                 "ON" => {
                     println!("[CMD] Turning device ON");
                     Some("{\"status\":\"on\"}")
@@ -68,8 +71,23 @@ impl MessageHandler for CmdHandler {
                     Some("{\"status\":\"rebooting\"}")
                 }
                 _ => {
-                    println!("[CMD] Unknown command: {}", cmd);
-                    Some("{\"status\":\"unknown\"}")
+                    // println!("[CMD] Unknown command: {}", cmd);
+                    // Some("{\"status\":\"unknown\"}")
+                    // 尝试解析为颜色命令 "R,G,B"
+                    if let Some((_r, _g, _b)) = parse_color_str(trimmed) {
+                        // 发送到 LED 信道
+                        let mut color_str = heapless::String::<32>::new();
+                        if color_str.push_str(trimmed).is_ok() {
+                            let _ = COLOR_CHANNEL.try_send(color_str);
+                            println!("[CMD] Color command sent to LED: {}", trimmed);
+                        } else {
+                            println!("[CMD] Color string too long");
+                        }
+                        Some("{\"status\":\"color_set\"}")
+                    } else {
+                        println!("[CMD] Unknown command: {}", trimmed);
+                        Some("{\"status\":\"unknown\"}")
+                    }
                 }
             }
         } else {
@@ -235,13 +253,15 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
     }
 }
 
-// 静态内存分配宏
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
-        x
-    }};
+/// 解析 "R,G,B" 格式的颜色字符串，返回 Some((r,g,b))，否则返回 None
+fn parse_color_str(s: &str) -> Option<(u8, u8, u8)> {
+    let parts: heapless::Vec<_, 3> = s.split(',').collect();
+    if parts.len() == 3 {
+        let r = parts[0].parse().ok()?;
+        let g = parts[1].parse().ok()?;
+        let b = parts[2].parse().ok()?;
+        Some((r, g, b))
+    } else {
+        None
+    }
 }
-use mk_static;
