@@ -122,4 +122,3 @@
 | 中 | 清理 Cargo features，补充 `defmt` feature，评估 `v5` 是否默认启用，并移除未使用依赖 | 建议下个迭代 |
 | 中 | 为 MQTT packet 编解码、`PUBACK` / `SUBACK`、buffer 边界和 `TopicRegistry` 增加最小测试集 | 建议下个迭代 |
 | 中 | 拆分 `src/bin/main.rs`，将 Wi-Fi、HTTP、MQTT、LED 控制拆成独立模块 | 建议下个迭代 |
-| 低 | 同步 `README.md` 和 `ARCHITECTURE.md`，补充可编译 examples | 可择机进行 |
