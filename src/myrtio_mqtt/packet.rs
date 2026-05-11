@@ -1,8 +1,7 @@
 //! # MQTT Packet Structures and Serialization
 //!
-//! This module defines the core MQTT packet types and the traits for encoding and
-//! decoding them to and from a byte buffer. It supports both MQTT v3.1.1 and v5
-//! through conditional compilation.
+//! This module defines the core MQTT v3.1.1 packet types and the traits for encoding
+//! and decoding them to and from a byte buffer.
 
 use super::client::{LastWill, MqttVersion};
 use super::error::{MqttError, ProtocolError};
@@ -11,10 +10,6 @@ use super::util::{self, read_utf8_string, write_utf8_string};
 use core::marker::PhantomData;
 use defmt::info;
 use heapless::Vec;
-
-// Conditionally import v5-specific utilities only when the feature is enabled.
-#[cfg(feature = "v5")]
-use crate::myrtio_mqtt::util::{read_properties, write_properties};
 
 /// Represents the Quality of Service (QoS) levels for MQTT messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd)]
@@ -107,13 +102,6 @@ where
     Ok(Some(packet))
 }
 
-#[cfg(feature = "v5")]
-#[derive(Debug)]
-pub struct Property<'a> {
-    pub id: u8,
-    pub data: &'a [u8],
-}
-
 // --- CONNECT Packet ---
 #[derive(Debug)]
 pub struct Connect<'a> {
@@ -123,8 +111,6 @@ pub struct Connect<'a> {
     pub username: Option<&'a str>,
     pub password: Option<&'a [u8]>,
     pub will: Option<LastWill<'a>>,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
 }
 
 impl<'a> Connect<'a> {
@@ -136,8 +122,6 @@ impl<'a> Connect<'a> {
             username: None,
             password: None,
             will: None,
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
         }
     }
 
@@ -157,8 +141,6 @@ impl<'a> Connect<'a> {
             username,
             password,
             will,
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
         }
     }
 }
@@ -167,7 +149,7 @@ impl<'a> EncodePacket for Connect<'a> {
     fn encode(
         &self,
         buf: &mut [u8],
-        version: MqttVersion,
+        _version: MqttVersion,
     ) -> Result<usize, MqttError<transport::ErrorPlaceHolder>> {
         let mut cursor = 0;
         buf[cursor] = 0x10;
@@ -175,10 +157,10 @@ impl<'a> EncodePacket for Connect<'a> {
         let remaining_len_pos = cursor;
         cursor += 4;
         let content_start = cursor;
-        // Protocol name is "MQTT" for both v3.1.1 and v5
+        // Protocol name is "MQTT" for MQTT 3.1.1.
         cursor += write_utf8_string(&mut buf[cursor..], "MQTT")?;
-        // Protocol level: 4 for MQTT 3.1.1, 5 for MQTT 5.0
-        buf[cursor] = if version == MqttVersion::V5 { 5 } else { 4 };
+        // Protocol level 4 is MQTT 3.1.1.
+        buf[cursor] = 4;
         cursor += 1;
 
         // Build connect flags
@@ -206,11 +188,6 @@ impl<'a> EncodePacket for Connect<'a> {
 
         buf[cursor..cursor + 2].copy_from_slice(&self.keep_alive.to_be_bytes());
         cursor += 2;
-        #[cfg(feature = "v5")]
-        if version == MqttVersion::V5 {
-            write_properties(&mut cursor, buf, &self.properties)?;
-        }
-
         // Payload: Client ID
         cursor += write_utf8_string(&mut buf[cursor..], self.client_id)?;
 
@@ -254,12 +231,6 @@ impl<'a> DecodePacket<'a> for Connect<'a> {
         cursor += 1;
         let keep_alive = u16::from_be_bytes([buf[cursor], buf[cursor + 1]]);
         cursor += 2;
-        #[cfg(feature = "v5")]
-        let properties = if _version == MqttVersion::V5 {
-            read_properties(&mut cursor, buf)?
-        } else {
-            Vec::new()
-        };
         let client_id = read_utf8_string(&mut cursor, buf)?;
         let will = if has_will {
             let will_qos = match (connect_flags >> 3) & 0x03 {
@@ -309,8 +280,6 @@ impl<'a> DecodePacket<'a> for Connect<'a> {
             username,
             password,
             will,
-            #[cfg(feature = "v5")]
-            properties,
         })
     }
 }
@@ -337,33 +306,20 @@ fn write_binary_data(
 pub struct ConnAck<'a> {
     pub session_present: bool,
     pub reason_code: u8,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
-    #[cfg(not(feature = "v5"))]
     _phantom: PhantomData<&'a ()>,
 }
 impl<'a> DecodePacket<'a> for ConnAck<'a> {
     fn decode(
         buf: &'a [u8],
-        version: MqttVersion,
+        _version: MqttVersion,
     ) -> Result<Self, MqttError<transport::ErrorPlaceHolder>> {
         let mut cursor = 2;
         let session_present = (buf[cursor] & 0x01) != 0;
         cursor += 1;
         let reason_code = buf[cursor];
-        #[cfg(feature = "v5")]
-        let properties = if version == MqttVersion::V5 {
-            cursor += 1;
-            read_properties(&mut cursor, buf)?
-        } else {
-            Vec::new()
-        };
         Ok(Self {
             session_present,
             reason_code,
-            #[cfg(feature = "v5")]
-            properties,
-            #[cfg(not(feature = "v5"))]
             _phantom: PhantomData,
         })
     }
@@ -380,8 +336,6 @@ pub struct Publish<'a> {
     pub retain: bool,
     pub payload: &'a [u8],
     pub packet_id: Option<u16>,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
 }
 impl<'a> DecodePacket<'a> for Publish<'a> {
     fn decode(
@@ -410,13 +364,6 @@ impl<'a> DecodePacket<'a> for Publish<'a> {
             None
         };
 
-        #[cfg(feature = "v5")]
-        let properties = if _version == MqttVersion::V5 {
-            crate::myrtio_mqtt::util::read_properties(&mut cursor, buf)?
-        } else {
-            Vec::new()
-        };
-
         let payload = &buf[cursor..];
 
         Ok(Publish {
@@ -425,8 +372,6 @@ impl<'a> DecodePacket<'a> for Publish<'a> {
             retain,
             payload,
             packet_id,
-            #[cfg(feature = "v5")]
-            properties,
         })
     }
 }
@@ -482,9 +427,6 @@ impl<'a> EncodePacket for Publish<'a> {
 #[derive(Debug)]
 pub struct PubAck<'a> {
     pub packet_id: u16,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
-    #[cfg(not(feature = "v5"))]
     _phantom: PhantomData<&'a ()>,
 }
 impl<'a> DecodePacket<'a> for PubAck<'a> {
@@ -494,9 +436,6 @@ impl<'a> DecodePacket<'a> for PubAck<'a> {
     ) -> Result<Self, MqttError<transport::ErrorPlaceHolder>> {
         Ok(PubAck {
             packet_id: 0,
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
-            #[cfg(not(feature = "v5"))]
             _phantom: PhantomData,
         })
     }
@@ -507,8 +446,6 @@ impl<'a> DecodePacket<'a> for PubAck<'a> {
 pub struct Subscribe<'a> {
     pub packet_id: u16,
     pub topics: Vec<(&'a str, QoS), 8>,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
 }
 
 impl<'a> Subscribe<'a> {
@@ -516,12 +453,7 @@ impl<'a> Subscribe<'a> {
     pub fn new(packet_id: u16, topic: &'a str, qos: QoS) -> Self {
         let mut topics = Vec::new();
         let _ = topics.push((topic, qos));
-        Self {
-            packet_id,
-            topics,
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
-        }
+        Self { packet_id, topics }
     }
 }
 
@@ -533,8 +465,6 @@ impl<'a> DecodePacket<'a> for Subscribe<'a> {
         Ok(Subscribe {
             packet_id: 0,
             topics: Vec::new(),
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
         })
     }
 }
@@ -582,9 +512,6 @@ impl<'a> EncodePacket for Subscribe<'a> {
 pub struct SubAck<'a> {
     pub packet_id: u16,
     pub reason_codes: Vec<u8, 8>,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
-    #[cfg(not(feature = "v5"))]
     _phantom: PhantomData<&'a ()>,
 }
 impl<'a> DecodePacket<'a> for SubAck<'a> {
@@ -600,13 +527,6 @@ impl<'a> DecodePacket<'a> for SubAck<'a> {
         let packet_id = u16::from_be_bytes([buf[cursor], buf[cursor + 1]]);
         cursor += 2;
 
-        #[cfg(feature = "v5")]
-        let properties = if _version == MqttVersion::V5 {
-            crate::myrtio_mqtt::util::read_properties(&mut cursor, buf)?
-        } else {
-            Vec::new()
-        };
-
         // Reason codes
         let mut reason_codes = Vec::new();
         while cursor < packet_end {
@@ -617,9 +537,6 @@ impl<'a> DecodePacket<'a> for SubAck<'a> {
         Ok(SubAck {
             packet_id,
             reason_codes,
-            #[cfg(feature = "v5")]
-            properties,
-            #[cfg(not(feature = "v5"))]
             _phantom: PhantomData,
         })
     }
@@ -650,11 +567,6 @@ pub struct PingResp;
 // --- DISCONNECT Packet ---
 #[derive(Debug)]
 pub struct Disconnect<'a> {
-    #[cfg(feature = "v5")]
-    pub reason_code: u8,
-    #[cfg(feature = "v5")]
-    pub properties: Vec<Property<'a>, 8>,
-    #[cfg(not(feature = "v5"))]
     pub _phantom: PhantomData<&'a ()>,
 }
 impl<'a> DecodePacket<'a> for Disconnect<'a> {
@@ -663,11 +575,6 @@ impl<'a> DecodePacket<'a> for Disconnect<'a> {
         _version: MqttVersion,
     ) -> Result<Self, MqttError<transport::ErrorPlaceHolder>> {
         Ok(Disconnect {
-            #[cfg(feature = "v5")]
-            reason_code: 0,
-            #[cfg(feature = "v5")]
-            properties: Vec::new(),
-            #[cfg(not(feature = "v5"))]
             _phantom: PhantomData,
         })
     }

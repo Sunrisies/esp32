@@ -10,8 +10,9 @@
 //! - **Fully Async:** Built with `async/await` and leverages the Embassy ecosystem for timers
 //!   and networking, ensuring non-blocking operations.
 //! - **Rust 2024 Edition:** Uses native `async fn` in traits, removing the need for `async-trait`.
-//! - **MQTT v3.1.1 and v5 Support:** Supports both major versions of the MQTT protocol, selectable
-//!   via feature flags.
+//! - **MQTT v3.1.1:** Keeps the protocol surface small and compatible with common embedded
+//!   brokers. MQTT v5 support was removed until a complete property/reason-code implementation
+//!   is needed.
 //! - **Transport Agnostic:** A flexible `MqttTransport` trait allows the client to run over any
 //!   reliable, ordered, stream-based communication channel, including TCP, UART, or SPI.
 //! - **QoS 0 & 1:** Implements "at most once" and "at least once" delivery guarantees.

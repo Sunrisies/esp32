@@ -6,7 +6,6 @@
 use super::error::{MqttError, ProtocolError};
 use super::packet::{self, Connect, EncodePacket, MqttPacket, PingReq, Publish, QoS, Subscribe};
 use super::transport::{self, MqttTransport};
-use defmt::info;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::{String, Vec};
 
@@ -14,8 +13,8 @@ use heapless::{String, Vec};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum MqttVersion {
+    /// MQTT 3.1.1.
     V3,
-    V5,
 }
 
 /// Last Will and Testament configuration for MQTT CONNECT.
@@ -52,11 +51,6 @@ impl<'a> MqttOptions<'a> {
             password: None,
             will: None,
         }
-    }
-    #[cfg(feature = "v5")]
-    pub fn with_version(mut self, version: MqttVersion) -> Self {
-        self.version = version;
-        self
     }
     pub fn with_keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = keep_alive;
@@ -276,8 +270,6 @@ where
             retain,
             payload,
             packet_id,
-            #[cfg(feature = "v5")]
-            properties: heapless::Vec::new(),
         };
 
         let len = publish

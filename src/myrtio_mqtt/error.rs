@@ -118,7 +118,4 @@ pub enum ProtocolError {
     PayloadTooLarge,
     /// A string was not valid UTF-8.
     InvalidUtf8String,
-    /// An MQTT v5 packet contained too many properties.
-    #[cfg(feature = "v5")]
-    TooManyProperties,
 }

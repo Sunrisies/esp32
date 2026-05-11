@@ -3,12 +3,6 @@
 //! This module provides helper functions for reading and writing MQTT-specific data types
 //! from and to byte buffers, such as variable-byte integers and length-prefixed strings.
 
-#[cfg(feature = "v5")]
-use heapless::Vec;
-
-#[cfg(feature = "v5")]
-use crate::myrtio_mqtt::packet;
-
 use super::error::{MqttError, ProtocolError};
 use super::transport;
 
@@ -124,63 +118,4 @@ pub fn write_utf8_string(
     slice[0..2].copy_from_slice(&len_bytes);
     slice[2..].copy_from_slice(s.as_bytes());
     Ok(required_space)
-}
-
-/// Reads MQTT v5 properties from the buffer.
-#[cfg(feature = "v5")]
-pub fn read_properties<'a>(
-    cursor: &mut usize,
-    buf: &'a [u8],
-) -> Result<Vec<packet::Property<'a>, 8>, MqttError<transport::ErrorPlaceHolder>> {
-    let mut properties = Vec::new();
-    let prop_len = read_variable_byte_integer(cursor, buf)?;
-    let prop_end = *cursor + prop_len;
-
-    while *cursor < prop_end {
-        let id = buf[*cursor];
-        *cursor += 1;
-        let data_start = *cursor;
-        // This is a simplified implementation. A real one would decode property data
-        // based on the specific property ID.
-        let data_len = 1; // Placeholder
-        *cursor += data_len;
-        properties
-            .push(packet::Property {
-                id,
-                data: &buf[data_start..data_start + data_len],
-            })
-            .map_err(|_| MqttError::Protocol(ProtocolError::TooManyProperties))?;
-    }
-    Ok(properties)
-}
-
-/// Writes MQTT v5 properties to the buffer.
-#[cfg(feature = "v5")]
-pub fn write_properties(
-    cursor: &mut usize,
-    buf: &mut [u8],
-    properties: &[packet::Property],
-) -> Result<(), MqttError<transport::ErrorPlaceHolder>> {
-    // This is a simplified implementation. A real one would calculate total length first.
-    let prop_len_cursor_start = *cursor;
-    *cursor += 1; // Reserve space for length
-
-    let props_start = *cursor;
-    for prop in properties {
-        buf[*cursor] = prop.id;
-        *cursor += 1;
-        buf[*cursor..*cursor + prop.data.len()].copy_from_slice(prop.data);
-        *cursor += prop.data.len();
-    }
-    let total_prop_len = *cursor - props_start;
-
-    // Write the actual property length
-    let mut temp_cursor = prop_len_cursor_start;
-    let _ = crate::myrtio_mqtt::util::write_variable_byte_integer(
-        &mut temp_cursor,
-        buf,
-        total_prop_len,
-    )?;
-
-    Ok(())
 }

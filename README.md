@@ -72,6 +72,6 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 
 ## 说明
 
-- 默认启用 `esp32-log` 和 `v5` 特性
+- 默认启用 `esp32-log`；MQTT 协议路径固定为 v3.1.1，未启用未完成的 v5 实现
 - 工程面向裸机目标，依赖 `esp-hal`、`esp-radio`、`embassy-*` 生态
 - Wi-Fi 凭据和 MQTT broker 地址由 `build.rs` 生成到 `OUT_DIR`，不再保存在源码中

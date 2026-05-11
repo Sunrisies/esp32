@@ -1008,7 +1008,6 @@ checksum = "57649401fc2f906a16e2268de88693724a125adcd0eba89b594a157affcee2d5"
 name = "esp32"
 version = "0.1.0"
 dependencies = [
- "critical-section",
  "defmt 1.0.1",
  "document-features",
  "embassy-executor",
@@ -1026,7 +1025,6 @@ dependencies = [
  "esp-rtos",
  "futures",
  "heapless 0.9.2",
- "log",
  "reqwless",
  "rgb",
  "smart-leds",

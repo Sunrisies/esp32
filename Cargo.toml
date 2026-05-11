@@ -21,12 +21,10 @@ esp-backtrace = { version = "0.19.0", features = [
     "panic-handler",
     "defmt",
 ] }
-critical-section = "1.2.0"
 # esp-hal-smartled = "0.17.0"
 smart-leds = "0.4.0"
 esp-radio = { version = "0.18", features = ["esp32c6", "wifi"] }
 esp-alloc = { version = "0.10.0", features = ["esp32c6"] }
-log = "0.4.29"
 esp-rtos = { version = "0.3", features = ["esp32c6", "embassy", "esp-radio"] }
 embassy-executor = "0.10.0"
 embassy-net = { version = "0.9.1", features = [
@@ -63,9 +61,9 @@ default-features = false
 [dependencies.embassy-sync]
 version = "0.7.2"
 [features]
-default = ["esp32-log", 'v5']
+default = ["esp32-log"]
 esp32-log = []
-v5 = []
+defmt = []
 
 [dependencies.rgb]
 version = "0.8.52"

@@ -28,7 +28,7 @@
 - `src/myrtio_mqtt/error.rs`
   - 协议错误、连接错误、传输错误
 - `src/myrtio_mqtt/util.rs`
-  - 变量长度整数、UTF-8 字符串、v5 属性辅助函数
+  - 变量长度整数、UTF-8 字符串辅助函数
 
 ### 运行时层
 
@@ -132,4 +132,4 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 - 传输不可知，客户端只依赖 `MqttTransport`
 - 模块化运行时，业务逻辑通过 `MqttModule` 接入
 - 构建期配置注入，避免在源码中保存设备凭据和 broker 地址
-- 默认启用 `esp32-log` 和 MQTT v5 支持
+- 默认启用 `esp32-log`；MQTT 协议路径固定为 v3.1.1
