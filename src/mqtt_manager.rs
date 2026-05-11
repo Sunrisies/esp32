@@ -4,10 +4,11 @@ use crate::myrtio_mqtt::{
 };
 use core::str;
 
+use crate::config::{MQTT_BROKER_IP, MQTT_CLIENT_ID, MQTT_PORT};
 use defmt::info;
 use heapless::{String, Vec};
 
-use core::net::{Ipv4Addr, SocketAddrV4};
+use core::net::SocketAddrV4;
 use embassy_net::{IpEndpoint, Stack, tcp::TcpSocket};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -16,11 +17,6 @@ use embassy_time::{Duration, Timer};
 use esp_println::println;
 pub static COLOR_CHANNEL: Channel<CriticalSectionRawMutex, heapless::String<32>, 2> =
     Channel::new();
-// 配置常量
-const MQTT_BROKER_IP: Ipv4Addr = Ipv4Addr::new(175, 27, 135, 250);
-const MQTT_PORT: u16 = 1883;
-const MQTT_CLIENT_ID: &str = "esp32c6-client";
-
 // ===== 用静态常量定义所有主题 =====
 const TOPIC_CMD: &str = "device/cmd";
 const TOPIC_CONFIG: &str = "device/config";

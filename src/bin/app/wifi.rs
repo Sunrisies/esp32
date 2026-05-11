@@ -1,5 +1,3 @@
-use core::net::Ipv4Addr;
-
 use embassy_net::{Ipv4Cidr, Runner, Stack, StaticConfigV4};
 use embassy_time::{Duration, Timer};
 use esp_hal::rng::Rng;
@@ -8,11 +6,7 @@ use esp_radio::wifi::{
     AccessPointStationEventInfo, Config, ControllerConfig, Interface, WifiController,
     ap::AccessPointConfig, sta::StationConfig,
 };
-
-const WIFI_SSID: &str = "HOVER-2.4G";
-const WIFI_PASS: &str = "12345678";
-const AP_SSID: &str = "esp-radio-apsta";
-const AP_IP: Ipv4Addr = Ipv4Addr::new(192, 168, 2, 1);
+use esp32::config::{WIFI_AP_IP, WIFI_AP_SSID, WIFI_PASSWORD, WIFI_SSID};
 
 pub fn start(
     wifi: esp_hal::peripherals::WIFI<'static>,
@@ -20,8 +14,8 @@ pub fn start(
     let access_point_station_config = Config::AccessPointStation(
         StationConfig::default()
             .with_ssid(WIFI_SSID)
-            .with_password(WIFI_PASS.to_ascii_lowercase()),
-        AccessPointConfig::default().with_ssid(AP_SSID),
+            .with_password(WIFI_PASSWORD.to_ascii_lowercase()),
+        AccessPointConfig::default().with_ssid(WIFI_AP_SSID),
     );
 
     println!("Starting wifi");
@@ -37,8 +31,8 @@ pub fn start(
 
 pub fn network_configs() -> (embassy_net::Config, embassy_net::Config) {
     let ap_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(AP_IP, 24),
-        gateway: Some(AP_IP),
+        address: Ipv4Cidr::new(WIFI_AP_IP, 24),
+        gateway: Some(WIFI_AP_IP),
         dns_servers: Default::default(),
     });
     let sta_config = embassy_net::Config::dhcpv4(Default::default());
@@ -64,9 +58,9 @@ pub async fn wait_for_networks(ap_stack: Stack<'static>, sta_stack: Stack<'stati
 
     ap_stack.wait_config_up().await;
 
-    println!("Connect to the AP `{AP_SSID}` and point your browser to http://{AP_IP}:8080/");
+    println!("Connect to the AP `{WIFI_AP_SSID}` and point your browser to http://{WIFI_AP_IP}:8080/");
     println!(
-        "Use a static IP in the range 192.168.2.2 .. 192.168.2.255, use gateway {AP_IP}"
+        "Use a static IP in the range 192.168.2.2 .. 192.168.2.255, use gateway {WIFI_AP_IP}"
     );
     println!("Or connect to the ap `{WIFI_SSID}` and point your browser to http://{sta_address}:8080/");
 }

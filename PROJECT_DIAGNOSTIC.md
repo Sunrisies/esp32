@@ -24,6 +24,7 @@
 - `src/bin/app/mqtt.rs`
 - `src/bin/app/led.rs`
 - `build.rs`
+- `src/config.rs`
 
 #### 业务逻辑模块
 
@@ -45,7 +46,7 @@
 1. `src/myrtio_mqtt/runtime/event_loop.rs` 被导出为 `MqttRuntime`，但 `run()` 主体基本被注释掉并直接返回 `Ok(())`，运行时功能实际不可用。
 2. `src/myrtio_mqtt/runtime/runtime.rs` 和 `src/myrtio_mqtt/runtime/module.rs` 是未挂载的旧实现，且与 `traits.rs` / `event_loop.rs` 存在重复设计。
 3. `src/mqtt_mini.rs` 为空且未挂载，`MQTT_INCOMING`、`MqttMessage` 等符号未实际使用。
-4. Wi-Fi 凭据和 MQTT broker 地址仍在源码中，配置边界还需要继续收敛。
+4. Wi-Fi 凭据和 MQTT broker 地址已迁出源码，由 `build.rs` 从环境变量、`.env.local` 或 `.env` 生成到 `OUT_DIR/app_config.rs`。
 
 ## Cargo.toml 诊断
 
@@ -119,7 +120,7 @@
 | --- | --- | --- |
 | 高 | 修复 `MqttRuntime::run` 的真实实现，统一保留 `event_loop.rs` 或 `runtime.rs` 其中一套，并删除未挂载旧文件 | 建议本周完成 |
 | 高 | 移除 `src/mqtt_manager.rs` 中的 `static mut`，改用 `StaticCell` 或受控缓冲 | 建议本周完成 |
-| 高 | 将 Wi-Fi SSID、密码和 MQTT broker 地址从源码迁出到构建配置或设备配置区 | 建议本周完成 |
+| 高 | 已完成：将 Wi-Fi SSID、密码和 MQTT broker 地址从源码迁出，由 `build.rs` 从环境变量或 `.env` 生成配置 | 2026-05-12 已完成 |
 | 中 | 清理 Cargo features，补充 `defmt` feature，评估 `v5` 是否默认启用，并移除未使用依赖 | 建议下个迭代 |
 | 中 | 为 MQTT packet 编解码、`PUBACK` / `SUBACK`、buffer 边界和 `TopicRegistry` 增加最小测试集 | 建议下个迭代 |
 | 中 | 已完成：拆分 `src/bin/main.rs`，将 Wi-Fi、HTTP、MQTT、LED 控制拆成 `src/bin/app/` 独立模块 | 2026-05-12 已完成 |

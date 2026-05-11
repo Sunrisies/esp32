@@ -15,6 +15,47 @@
 
 ## 构建
 
+构建时通过环境变量或 `.env` 注入设备配置。未设置时会使用可编译的占位默认值，实际烧录前应显式设置。
+
+推荐本地开发使用 `.env`：
+
+```text
+ESP32_WIFI_SSID=your-wifi-ssid
+ESP32_WIFI_PASSWORD=your-wifi-password
+ESP32_MQTT_BROKER_IP=192.168.1.10
+ESP32_MQTT_PORT=1883
+ESP32_MQTT_CLIENT_ID=esp32c6-client
+```
+
+可从 `.env.example` 复制一份 `.env`。`.env` 和 `.env.local` 会被 Git 忽略，不要提交真实凭据。
+
+配置优先级：
+
+1. 构建环境变量
+2. `.env.local`
+3. `.env`
+4. `build.rs` 中的占位默认值
+
+PowerShell 示例：
+
+```powershell
+$env:ESP32_WIFI_SSID="your-wifi-ssid"
+$env:ESP32_WIFI_PASSWORD="your-wifi-password"
+$env:ESP32_MQTT_BROKER_IP="192.168.1.10"
+$env:ESP32_MQTT_PORT="1883"
+$env:ESP32_MQTT_CLIENT_ID="esp32c6-client"
+```
+
+支持的配置项：
+
+- `ESP32_WIFI_SSID`: STA 模式连接的 Wi-Fi SSID
+- `ESP32_WIFI_PASSWORD`: STA 模式连接的 Wi-Fi 密码
+- `ESP32_WIFI_AP_SSID`: 设备 AP 模式 SSID，默认 `esp-radio-apsta`
+- `ESP32_WIFI_AP_IP`: 设备 AP 静态 IP，默认 `192.168.2.1`
+- `ESP32_MQTT_BROKER_IP`: MQTT broker IPv4 地址，默认 `0.0.0.0`，实际烧录前必须设置
+- `ESP32_MQTT_PORT`: MQTT broker 端口，默认 `1883`
+- `ESP32_MQTT_CLIENT_ID`: MQTT client id，默认 `esp32c6-client`
+
 ```bash
 cargo check --target riscv32imac-unknown-none-elf
 cargo check --examples --target riscv32imac-unknown-none-elf
@@ -33,4 +74,4 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 
 - 默认启用 `esp32-log` 和 `v5` 特性
 - 工程面向裸机目标，依赖 `esp-hal`、`esp-radio`、`embassy-*` 生态
-- 设备凭据和 broker 地址目前仍在源码中，建议后续迁移到配置层
+- Wi-Fi 凭据和 MQTT broker 地址由 `build.rs` 生成到 `OUT_DIR`，不再保存在源码中
