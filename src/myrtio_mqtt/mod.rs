@@ -38,40 +38,40 @@
 //! multiple concerns (Home Assistant, telemetry, OTA, etc.):
 //!
 //! ```ignore
-//! use myrtio_mqtt::runtime::{MqttModule, MqttRuntime, TopicRegistry, Context};
+//! use myrtio_mqtt::runtime::{MqttModule, MqttRuntime, Publish, PublishOutbox, TopicCollector};
 //!
 //! struct MyModule;
 //!
-//! impl<'a, T, const MAX_TOPICS: usize, const BUF_SIZE: usize>
-//!     MqttModule<'a, T, MAX_TOPICS, BUF_SIZE> for MyModule
-//! where
-//!     T: MqttTransport,
-//! {
-//!     fn register<'reg>(&'reg self, registry: &mut TopicRegistry<'reg, MAX_TOPICS>) {
-//!         let _ = registry.add("device/cmd");
+//! impl MqttModule for MyModule {
+//!     fn register(&self, collector: &mut dyn TopicCollector) {
+//!         let _ = collector.add("device/cmd");
 //!     }
 //!
-//!     fn on_message<'m>(&mut self, msg: &Publish<'m>) {
-//!         // Handle incoming messages
+//!     fn on_message(&mut self, msg: &Publish<'_>) {
+//!         if msg.topic == "device/cmd" {
+//!             // Handle incoming messages
+//!         }
+//!     }
+//!
+//!     fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+//!         outbox.publish("device/state", b"updated", myrtio_mqtt::QoS::AtLeastOnce);
 //!     }
 //! }
 //! ```
 //!
 //! ## Topic Registration Lifetime Model
 //!
-//! The `MqttModule::register` method uses a generic lifetime `'reg` tied to the
-//! borrow of `self`. This allows modules to register:
+//! The `MqttModule::register` method receives a `TopicCollector` that copies
+//! each topic string into an internal registry. This allows modules to register:
 //!
 //! - **Static topics**: `const CMD_TOPIC: &str = "device/cmd";` (recommended)
 //! - **Dynamic topics**: Topics stored in `heapless::String` fields
 //!
 //! The registry is only used during initial subscription and is dropped before
-//! the main event loop, so topics only need to live as long as the module.
+//! the main event loop, so topics only need to live long enough for registration.
 //!
 //! See `examples/const_topics_module.rs` and `examples/dynamic_topics_module.rs`
 //! for complete examples.
-
-#![no_std]
 pub mod client;
 pub mod error;
 pub mod packet;

@@ -7,6 +7,7 @@ use esp_backtrace as _;
 use esp_hal::main;
 
 use esp32::myrtio_mqtt::{
+    MqttClient, MqttOptions, QoS,
     client::LastWill,
     packet::Publish,
     runtime::{
@@ -14,7 +15,6 @@ use esp32::myrtio_mqtt::{
         TopicCollector, TopicRegistry,
     },
     transport::{MqttTransport, TransportError},
-    MqttClient, MqttOptions, QoS,
 };
 
 const CLIENT_ID: &str = "const-topics-demo";
@@ -53,6 +53,18 @@ impl ConstTopicsModule {
             pending_state_publish: false,
         }
     }
+
+    fn publish_state(&mut self, outbox: &mut dyn PublishOutbox) {
+        if self.pending_state_publish {
+            outbox.publish_with_retain(
+                STATE_TOPIC,
+                b"{\"status\":\"updated\"}",
+                QoS::AtLeastOnce,
+                true,
+            );
+            self.pending_state_publish = false;
+        }
+    }
 }
 
 impl MqttModule for ConstTopicsModule {
@@ -67,15 +79,7 @@ impl MqttModule for ConstTopicsModule {
     }
 
     fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
-        if self.pending_state_publish {
-            outbox.publish_with_retain(
-                STATE_TOPIC,
-                b"{\"status\":\"updated\"}",
-                QoS::AtLeastOnce,
-                true,
-            );
-            self.pending_state_publish = false;
-        }
+        self.publish_state(outbox);
         Duration::from_secs(30)
     }
 
@@ -99,6 +103,10 @@ impl MqttModule for ConstTopicsModule {
 
     fn needs_immediate_publish(&self) -> bool {
         self.pending_state_publish
+    }
+
+    fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+        self.publish_state(outbox);
     }
 }
 

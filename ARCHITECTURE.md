@@ -45,13 +45,6 @@
 - `src/myrtio_mqtt/runtime/event_loop.rs`
   - 当前导出的 `MqttRuntime`
 
-### 参考实现
-
-- `src/myrtio_mqtt/runtime/runtime.rs`
-- `src/myrtio_mqtt/runtime/module.rs`
-
-这两个文件保留为参考实现，不是当前 `runtime` 模块对外导出的主路径。
-
 ### 应用层
 
 - `src/mqtt_manager.rs`
@@ -107,8 +100,39 @@ impl MqttModule for MyModule {
         }
         embassy_time::Duration::from_secs(30)
     }
+
+    fn needs_immediate_publish(&self) -> bool {
+        self.pending
+    }
+
+    fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+        if self.pending {
+            outbox.publish("device/state", b"updated", myrtio_mqtt::QoS::AtLeastOnce);
+            self.pending = false;
+        }
+    }
 }
 ```
+
+`MqttRuntime::run` 是当前唯一保留的运行时入口，位于 `src/myrtio_mqtt/runtime/event_loop.rs`。
+它会在启动时连接 broker、订阅模块注册的 topic、执行 `on_start`，之后在同一个循环里处理 MQTT 收包、外部 `PublishRequestChannel` 发布请求和周期 `on_tick`。
+
+多业务通道建议优先使用多个明确 topic，例如 `device/ch1/cmd`、`device/ch2/cmd`。
+如果 broker 侧只能共用一个 topic，则在 payload 中放 `channel` 或 `type` 字段，并在 `on_message` 中根据内容分发到不同业务逻辑。
+运行时不需要为每个频道复制一套。
+
+## 当前架构边界
+
+这个仓库当前更接近 ESP32C6 Rust 学习和 bring-up 工程，不是已经收敛的生产固件。后续架构应先收敛以下边界：
+
+- MQTT 应统一到 `MqttRuntime` / `MqttModule` 模型。当前 `src/mqtt_manager.rs` 仍然手写连接、订阅、分发和重连逻辑，和 runtime 抽象并存。
+- MQTT over TCP 需要先做帧边界层。TCP read 不等于 MQTT packet，不能让 packet decoder 直接处理任意一次 read 的结果。
+- 业务通道建议放在 topic 层，例如 `device/{device_id}/ch/{channel}/cmd`；如果必须共用一个 topic，则 payload 必须有稳定字段，例如 `channel`、`type`、`value`。
+- 设备 availability 建议使用同一个 retained topic 表示 online/offline，避免 retained offline 状态残留。
+- AP/HTTP 调试入口不应依赖 STA 联网成功。设备配网错误时，AP 侧仍应能提供诊断信息。
+- `.env` 只适合构建期注入，不是安全凭据存储。烧录后的固件中仍包含这些字符串。
+- `src/bin/app/http.rs` 的 httpbin 代理属于联网演示，不应作为长期设备管理接口。
+- `src/ws2812.rs` 目前像从独立 crate 搬入的适配器，仍需要整理 crate-level attribute、RGBW 宏路径、RMT 时钟假设和废弃 rgb API。
 
 ## 可编译示例
 
@@ -133,3 +157,10 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 - 模块化运行时，业务逻辑通过 `MqttModule` 接入
 - 构建期配置注入，避免在源码中保存设备凭据和 broker 地址
 - 默认启用 `esp32-log`；MQTT 协议路径固定为 v3.1.1
+
+## 建议的演进顺序
+
+1. 先修复 Wi-Fi 密码大小写、MQTT 帧边界、packet 解码边界检查和 retained availability 这类会直接影响联网结果的问题。
+2. 再把 `src/mqtt_manager.rs` 迁移为一个或多个 `MqttModule`，让 topic 注册、消息分发和发布都走统一 runtime。
+3. 然后整理 HTTP 和 LED：HTTP 从 httpbin demo 改成本地配置/status API，LED 命令从纯字符串升级为稳定命令协议。
+4. 最后清理依赖、日志、WS2812 适配器和 RAM 预算，让工程从学习示例收敛成可维护固件。

@@ -6,7 +6,7 @@
 //! # Object Safety
 //!
 //! The `MqttModule` trait is designed to be dyn-compatible, meaning you can use
-//! `&mut dyn MqttModule<MAX_TOPICS>` as a trait object. This is essential for
+//! `&mut dyn MqttModule` as a trait object. This is essential for
 //! `no_std` embedded environments where you want to:
 //!
 //! - Store modules in `StaticCell` and pass them to Embassy tasks
@@ -118,13 +118,20 @@ pub trait TopicCollector {
 ///         }
 ///     }
 ///
+///     fn needs_immediate_publish(&self) -> bool {
+///         self.pending_state_update
+///     }
+///
+///     fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+///         if self.pending_state_update {
+///             outbox.publish(STATE_TOPIC, b"updated", QoS::AtMostOnce);
+///             self.pending_state_update = false;
+///         }
+///     }
+///
 ///     fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
 ///         outbox.publish(STATE_TOPIC, b"online", QoS::AtMostOnce);
 ///         Duration::from_secs(30)
-///     }
-///
-///     fn needs_immediate_publish(&self) -> bool {
-///         self.pending_state_update
 ///     }
 /// }
 /// ```
@@ -147,7 +154,7 @@ pub trait MqttModule {
     /// message data borrows from the client's buffer. Instead:
     /// - Process the message and update internal state
     /// - Set a flag indicating a response is needed
-    /// - Publish the response in `on_tick` (triggered by `needs_immediate_publish`)
+    /// - Publish the response in `on_publish` (triggered by `needs_immediate_publish`)
     fn on_message(&mut self, msg: &Publish<'_>);
 
     /// Perform periodic tasks and return the desired interval until the next tick.

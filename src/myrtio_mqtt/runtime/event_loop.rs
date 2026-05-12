@@ -1,7 +1,6 @@
 //! MQTT Runtime - drives modules and handles the event loop.
 
-use defmt::println;
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either3, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Receiver;
 use embassy_time::{Duration, Instant, Timer};
@@ -97,90 +96,83 @@ where
     ///
     /// This method runs forever unless an error occurs.
     pub async fn run(&mut self) -> Result<(), MqttError<T::Error>> {
-        // if let Some(last_will) = self.module.last_will()
-        //     && !self.client.set_last_will(last_will)
-        // {
-        //     return Err(MqttError::BufferTooSmall);
-        // }
-        // println!("---------------0");
-        // // Connect to the broker
-        // self.client.connect().await?;
+        if let Some(last_will) = self.module.last_will()
+            && !self.client.set_last_will(last_will)
+        {
+            return Err(MqttError::BufferTooSmall);
+        }
 
-        // // Collect and subscribe to topics
-        // {
-        //     let mut registry = TopicRegistry::<MAX_TOPICS>::new();
-        //     self.module.register(&mut registry);
+        self.client.connect().await?;
 
-        //     // Subscribe to all registered topics
-        //     for topic in registry.iter() {
-        //         self.client.subscribe(topic, QoS::AtMostOnce).await?;
-        //     }
-        // }
+        let mut registry = TopicRegistry::<MAX_TOPICS>::new();
+        self.module.register(&mut registry);
+        for topic in registry.iter() {
+            self.client.subscribe(topic, QoS::AtMostOnce).await?;
+        }
 
-        // // Create a reusable outbox for module callbacks
-        // let mut outbox: BufferedOutbox<OUTBOX_CAPACITY, OUTBOX_TOPIC_SIZE, OUTBOX_PAYLOAD_SIZE> =
-        //     BufferedOutbox::new();
+        let mut outbox: BufferedOutbox<OUTBOX_CAPACITY, OUTBOX_TOPIC_SIZE, OUTBOX_PAYLOAD_SIZE> =
+            BufferedOutbox::new();
 
-        // // Call on_start for initial setup
-        // self.module.on_start(&mut outbox);
-        // self.drain_outbox(&mut outbox).await?;
+        self.module.on_start(&mut outbox);
+        self.drain_outbox(&mut outbox).await?;
 
-        // // Initial tick and set deadline for next tick
-        // let tick_interval = self.module.on_tick(&mut outbox);
-        // self.drain_outbox(&mut outbox).await?;
-        // let mut tick_deadline = Instant::now() + tick_interval;
+        let tick_interval = self.module.on_tick(&mut outbox);
+        self.drain_outbox(&mut outbox).await?;
+        let mut tick_deadline = Instant::now() + tick_interval;
 
-        // // Main event loop
-        // loop {
-        //     // First, check for incoming publish requests (non-blocking)
-        //     if let Ok(req) = self.publisher_rx.try_receive() {
-        //         self.client
-        //             .publish_with_retain(req.topic, req.payload, req.qos, req.retain)
-        //             .await?;
-        //         continue;
-        //     }
+        loop {
+            while let Ok(req) = self.publisher_rx.try_receive() {
+                self.publish_request(req).await?;
+            }
 
-        //     // Calculate remaining time until tick
-        //     let now = Instant::now();
-        //     let remaining = if now >= tick_deadline {
-        //         Duration::from_millis(0)
-        //     } else {
-        //         tick_deadline - now
-        //     };
+            let remaining = Self::remaining_until(tick_deadline);
+            let poll_fut = self.client.poll();
+            let publish_fut = self.publisher_rx.receive();
+            let timer_fut = Timer::after(remaining);
 
-        //     // Select between poll and tick timer
-        //     let timer_fut = Timer::after(remaining);
-        //     let poll_fut = self.client.poll();
+            match select3(poll_fut, publish_fut, timer_fut).await {
+                Either3::First(result) => {
+                    let needs_publish = match result? {
+                        Some(MqttEvent::Publish(msg)) => {
+                            self.module.on_message(&msg);
+                            self.module.needs_immediate_publish()
+                        }
+                        None => false,
+                    };
 
-        //     match select(poll_fut, timer_fut).await {
-        //         Either::First(result) => {
-        //             // Incoming MQTT message or keep-alive handled
-        //             match result {
-        //                 Ok(Some(MqttEvent::Publish(msg))) => {
-        //                     self.module.on_message(&msg);
-        //                     // If module needs immediate state publish after command
-        //                     if self.module.needs_immediate_publish() {
-        //                         self.module.on_publish(&mut outbox);
-        //                         println!("1111111111111111");
-        //                         // self.drain_outbox(&mut outbox).await?;
-        //                     }
-        //                 }
-        //                 Ok(None) => {
-        //                     // No message, keep-alive was sent, continue
-        //                 }
-        //                 Err(e) => return Err(e),
-        //             }
-        //         }
-        //         Either::Second(()) => {
-        //             // Tick timer expired - periodic tick for discovery
-        //             let interval = self.module.on_tick(&mut outbox);
-        //             // self.drain_outbox(&mut outbox).await?;
-        //             // Set next tick deadline
-        //             tick_deadline = Instant::now() + interval;
-        //         }
-        //     }
-        // }
-        Ok(())
+                    if needs_publish {
+                        self.module.on_publish(&mut outbox);
+                        self.drain_outbox(&mut outbox).await?;
+                    }
+                }
+                Either3::Second(req) => {
+                    self.publish_request(req).await?;
+                }
+                Either3::Third(()) => {
+                    let interval = self.module.on_tick(&mut outbox);
+                    self.drain_outbox(&mut outbox).await?;
+                    tick_deadline = Instant::now() + interval;
+                }
+            }
+        }
+    }
+
+    async fn publish_request(
+        &mut self,
+        req: PublishRequest<'_>,
+    ) -> Result<(), MqttError<T::Error>> {
+        self.client
+            .publish_with_retain(req.topic, req.payload, req.qos, req.retain)
+            .await
+    }
+
+    fn remaining_until(deadline: Instant) -> Duration {
+        let now = Instant::now();
+        if now >= deadline {
+            Duration::from_millis(0)
+        } else {
+            deadline - now
+        }
     }
 
     /// 清空发件箱并发布所有缓冲邮件。

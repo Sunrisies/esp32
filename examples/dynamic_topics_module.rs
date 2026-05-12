@@ -8,6 +8,7 @@ use esp_hal::main;
 use heapless::String;
 
 use esp32::myrtio_mqtt::{
+    MqttClient, MqttOptions, QoS,
     client::LastWill,
     packet::Publish,
     runtime::{
@@ -15,7 +16,6 @@ use esp32::myrtio_mqtt::{
         TopicCollector, TopicRegistry,
     },
     transport::{MqttTransport, TransportError},
-    MqttClient, MqttOptions, QoS,
 };
 
 static PUBLISH_CHANNEL: PublishRequestChannel<'static, 4> = Channel::new();
@@ -63,6 +63,18 @@ impl DynamicTopicsModule {
         let _ = topic.push_str(suffix);
         topic
     }
+
+    fn publish_state(&mut self, outbox: &mut dyn PublishOutbox) {
+        if self.pending_state_publish {
+            outbox.publish_with_retain(
+                self.state_topic.as_str(),
+                b"{\"status\":\"updated\"}",
+                QoS::AtLeastOnce,
+                true,
+            );
+            self.pending_state_publish = false;
+        }
+    }
 }
 
 impl MqttModule for DynamicTopicsModule {
@@ -77,15 +89,7 @@ impl MqttModule for DynamicTopicsModule {
     }
 
     fn on_tick(&mut self, outbox: &mut dyn PublishOutbox) -> Duration {
-        if self.pending_state_publish {
-            outbox.publish_with_retain(
-                self.state_topic.as_str(),
-                b"{\"status\":\"updated\"}",
-                QoS::AtLeastOnce,
-                true,
-            );
-            self.pending_state_publish = false;
-        }
+        self.publish_state(outbox);
         Duration::from_secs(15)
     }
 
@@ -109,6 +113,10 @@ impl MqttModule for DynamicTopicsModule {
 
     fn needs_immediate_publish(&self) -> bool {
         self.pending_state_publish
+    }
+
+    fn on_publish(&mut self, outbox: &mut dyn PublishOutbox) {
+        self.publish_state(outbox);
     }
 }
 

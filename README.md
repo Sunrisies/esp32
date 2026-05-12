@@ -2,6 +2,8 @@
 
 这是一个面向 ESP32C6 的 `no_std` 异步示例工程，包含 Wi-Fi、HTTP、MQTT 和 WS2812 LED 控制代码。
 
+当前工程定位是 ESP32C6 Rust bring-up / 学习示例，已经可以编译和演示主要链路，但 MQTT 帧边界、重连策略、配置入口、WS2812 适配器和内存预算仍需要继续整理后才适合作为长期固件基础。
+
 ## 主要内容
 
 - `src/bin/main.rs`：设备入口，只保留启动顺序、静态资源分配和任务编排
@@ -75,3 +77,13 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 - 默认启用 `esp32-log`；MQTT 协议路径固定为 v3.1.1，未启用未完成的 v5 实现
 - 工程面向裸机目标，依赖 `esp-hal`、`esp-radio`、`embassy-*` 生态
 - Wi-Fi 凭据和 MQTT broker 地址由 `build.rs` 生成到 `OUT_DIR`，不再保存在源码中
+
+## 当前已知限制
+
+- `src/mqtt_manager.rs` 仍是手写 MQTT 循环，尚未迁移到 `MqttRuntime` / `MqttModule`
+- MQTT over TCP 还缺少完整帧重组，网络半包/粘包时可能解析失败
+- QoS1 ACK 和并发收包逻辑还需要补强，当前 ACK 等待期间可能跳过业务消息
+- AP/HTTP 调试入口当前依赖 STA 先拿到 IP，不适合配网失败时排障
+- `src/bin/app/http.rs` 的 httpbin 请求属于联网演示，不是生产管理接口
+- `.env` 是构建期注入，凭据会进入固件镜像，不等于安全存储
+- `src/ws2812.rs` 仍有废弃 API 和模块级属性 warning
