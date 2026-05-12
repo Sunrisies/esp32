@@ -1,6 +1,5 @@
 use core::{fmt::Write as FmtWrite, str};
 
-use embassy_futures::select::Either;
 use embassy_net::{IpListenEndpoint, Stack, tcp::TcpSocket};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
@@ -17,56 +16,23 @@ struct HttpRequest<'a> {
     body: &'a str,
 }
 
+enum ReadRequestOutcome {
+    Request(usize),
+    Closed,
+    BadRequest,
+}
+
 pub async fn serve(ap_stack: Stack<'static>, sta_stack: Stack<'static>) -> ! {
     let mut ap_server_rx_buffer = [0; 1536];
     let mut ap_server_tx_buffer = [0; 1536];
-    let mut sta_server_rx_buffer = [0; 1536];
-    let mut sta_server_tx_buffer = [0; 1536];
 
     let mut ap_server_socket =
         TcpSocket::new(ap_stack, &mut ap_server_rx_buffer, &mut ap_server_tx_buffer);
     ap_server_socket.set_timeout(Some(Duration::from_secs(10)));
 
-    let mut sta_server_socket = TcpSocket::new(
-        sta_stack,
-        &mut sta_server_rx_buffer,
-        &mut sta_server_tx_buffer,
-    );
-    sta_server_socket.set_timeout(Some(Duration::from_secs(10)));
-
     loop {
         esp32::log_info!("Waiting for local HTTP connection...");
-
-        let sta_ready = sta_stack.is_link_up() && sta_stack.is_config_up();
-        let server_socket = if sta_ready {
-            let either_socket = embassy_futures::select::select(
-                ap_server_socket.accept(IpListenEndpoint {
-                    addr: None,
-                    port: HTTP_PORT,
-                }),
-                sta_server_socket.accept(IpListenEndpoint {
-                    addr: None,
-                    port: HTTP_PORT,
-                }),
-            )
-            .await;
-            match either_socket {
-                Either::First(result) => {
-                    if let Err(e) = result {
-                        esp32::log_warn!("HTTP accept error: {:?}", e);
-                        continue;
-                    }
-                    &mut ap_server_socket
-                }
-                Either::Second(result) => {
-                    if let Err(e) = result {
-                        esp32::log_warn!("HTTP accept error: {:?}", e);
-                        continue;
-                    }
-                    &mut sta_server_socket
-                }
-            }
-        } else if let Err(e) = ap_server_socket
+        if let Err(e) = ap_server_socket
             .accept(IpListenEndpoint {
                 addr: None,
                 port: HTTP_PORT,
@@ -75,28 +41,30 @@ pub async fn serve(ap_stack: Stack<'static>, sta_stack: Stack<'static>) -> ! {
         {
             esp32::log_warn!("HTTP accept error: {:?}", e);
             continue;
-        } else {
-            &mut ap_server_socket
-        };
+        }
 
-        handle_connection(server_socket, sta_stack).await;
+        handle_connection(&mut ap_server_socket, sta_stack).await;
 
-        if let Err(e) = server_socket.flush().await {
+        if let Err(e) = ap_server_socket.flush().await {
             esp32::log_warn!("HTTP flush error: {:?}", e);
         }
 
         Timer::after(Duration::from_millis(100)).await;
-        server_socket.close();
+        ap_server_socket.close();
         Timer::after(Duration::from_millis(100)).await;
-        server_socket.abort();
+        ap_server_socket.abort();
     }
 }
 
 async fn handle_connection(socket: &mut TcpSocket<'_>, sta_stack: Stack<'static>) {
     let mut buffer = [0u8; REQUEST_BUFFER_SIZE];
-    let Some(len) = read_request(socket, &mut buffer).await else {
-        write_text_response(socket, 400, "Bad Request", "bad request").await;
-        return;
+    let len = match read_request(socket, &mut buffer).await {
+        ReadRequestOutcome::Request(len) => len,
+        ReadRequestOutcome::Closed => return,
+        ReadRequestOutcome::BadRequest => {
+            write_text_response(socket, 400, "Bad Request", "bad request").await;
+            return;
+        }
     };
 
     let request = match parse_request(&buffer[..len]) {
@@ -114,17 +82,17 @@ async fn handle_connection(socket: &mut TcpSocket<'_>, sta_stack: Stack<'static>
     }
 }
 
-async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Option<usize> {
+async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> ReadRequestOutcome {
     let mut pos = 0;
 
     loop {
         if pos >= buffer.len() {
             esp32::log_warn!("HTTP request too large");
-            return None;
+            return ReadRequestOutcome::BadRequest;
         }
 
         match socket.read(&mut buffer[pos..]).await {
-            Ok(0) => return None,
+            Ok(0) => return ReadRequestOutcome::Closed,
             Ok(len) => {
                 pos += len;
                 if request_complete(&buffer[..pos]) {
@@ -132,12 +100,12 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Option<u
                         "HTTP request:\n{}",
                         str::from_utf8(&buffer[..pos]).unwrap_or("<non-utf8>")
                     );
-                    return Some(pos);
+                    return ReadRequestOutcome::Request(pos);
                 }
             }
             Err(e) => {
                 esp32::log_warn!("HTTP read error: {:?}", e);
-                return None;
+                return ReadRequestOutcome::Closed;
             }
         }
     }
