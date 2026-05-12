@@ -61,8 +61,16 @@ default-features = false
 [dependencies.embassy-sync]
 version = "0.7.2"
 [features]
-default = ["esp32-log"]
+default = ["esp32-log","mqtt-protocol-log"]
+# Normal application log output. With this feature enabled, the local log facade
+# prints through `esp_println`; with it disabled and `defmt` enabled, it emits
+# `defmt` records instead.
 esp32-log = []
+# Verbose protocol/frame logs, such as MQTT/TCP packet traces and raw HTTP
+# request dumps. Kept off by default because these logs are noisy and can expose
+# payload data.
+protocol-log = []
+mqtt-protocol-log = ["protocol-log"]
 defmt = []
 
 [dependencies.rgb]

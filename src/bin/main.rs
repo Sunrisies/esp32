@@ -10,7 +10,6 @@ mod mqtt;
 #[path = "app/wifi.rs"]
 mod wifi;
 
-use defmt::info;
 use embassy_executor::Spawner;
 use embassy_net::StackResources;
 use esp_alloc as _;
@@ -36,7 +35,7 @@ macro_rules! mk_static {
 async fn main(spawner: Spawner) -> ! {
     esp_alloc::heap_allocator!(size: 128 * 1024);
 
-    info!("Starting Wi-Fi + LED demo");
+    esp32::log_info!("Starting Wi-Fi + LED demo");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let p = esp_hal::init(config);

@@ -157,8 +157,7 @@ where
     where
         T::Error: transport::TransportError,
     {
-        #[cfg(feature = "esp32-log")]
-        esp_println::println!("MQTT: Starting connect...");
+        crate::mqtt_protocol_log!("MQTT: Starting connect...");
 
         self.state = ConnectionState::Connecting;
         let will = if let Some(will) = self.runtime_will.as_ref() {
@@ -183,31 +182,32 @@ where
             .encode(&mut self.tx_buffer, self.options.version)
             .map_err(MqttError::cast_transport_error)?;
 
-        #[cfg(feature = "esp32-log")]
-        esp_println::println!("MQTT TX ({} bytes): {:02X?}", len, &self.tx_buffer[..len]);
+        crate::mqtt_protocol_log!("MQTT TX ({} bytes): {:02X?}", len, &self.tx_buffer[..len]);
 
         self.transport.send(&self.tx_buffer[..len]).await?;
 
-        #[cfg(feature = "esp32-log")]
-        esp_println::println!("MQTT: Waiting for CONNACK...");
+        crate::mqtt_protocol_log!("MQTT: Waiting for CONNACK...");
 
         let n = self.transport.recv(&mut self.rx_buffer).await?;
 
-        #[cfg(feature = "esp32-log")]
-        esp_println::println!("MQTT RX ({} bytes): {:02X?}", n, &self.rx_buffer[..n]);
+        crate::mqtt_protocol_log!("MQTT RX ({} bytes): {:02X?}", n, &self.rx_buffer[..n]);
 
         let packet = packet::decode::<T::Error>(&self.rx_buffer[..n], self.options.version);
 
-        #[cfg(feature = "esp32-log")]
-        if let Err(ref e) = packet {
-            esp_println::println!("MQTT decode error: {:?}", e);
+        #[cfg(all(
+            feature = "protocol-log",
+            any(feature = "esp32-log", feature = "defmt")
+        ))]
+        {
+            if let Err(ref e) = packet {
+                crate::mqtt_protocol_log!("MQTT decode error: {:?}", e);
+            }
         }
 
         let packet = packet?.ok_or(MqttError::Protocol(ProtocolError::InvalidResponse))?;
 
         if let MqttPacket::ConnAck(connack) = packet {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!(
+            crate::mqtt_protocol_log!(
                 "MQTT CONNACK: reason_code={}, session_present={}",
                 connack.reason_code,
                 connack.session_present
@@ -222,8 +222,7 @@ where
                 Err(MqttError::ConnectionRefused(connack.reason_code.into()))
             }
         } else {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!("MQTT: Expected CONNACK, got different packet!");
+            crate::mqtt_protocol_log!("MQTT: Expected CONNACK, got different packet!");
 
             self.state = ConnectionState::Disconnected;
             Err(MqttError::Protocol(ProtocolError::InvalidResponse))
@@ -413,11 +412,9 @@ where
                 Ok(None)
             }
             PollDecision::KeepAlive => {
-                #[cfg(feature = "esp32-log")]
-                esp_println::println!("MQTT: Sending PINGREQ");
+                crate::mqtt_protocol_log!("MQTT: Sending PINGREQ");
                 self._send_packet(PingReq).await?;
-                #[cfg(feature = "esp32-log")]
-                esp_println::println!("MQTT: PINGREQ sent");
+                crate::mqtt_protocol_log!("MQTT: PINGREQ sent");
                 Ok(None)
             }
         }

@@ -8,7 +8,6 @@ use super::error::{MqttError, ProtocolError};
 use super::transport;
 use super::util::{self, read_utf8_string, write_utf8_string};
 use core::marker::PhantomData;
-use defmt::info;
 use heapless::Vec;
 
 /// Represents the Quality of Service (QoS) levels for MQTT messages.
@@ -65,8 +64,7 @@ where
         return Ok(None);
     }
     let packet_type = buf[0] >> 4;
-    // info!("---------------");
-    info!("packet_type:{}", packet_type);
+    crate::mqtt_protocol_log!("packet_type:{}", packet_type);
 
     let packet = match packet_type {
         1 => MqttPacket::Connect(

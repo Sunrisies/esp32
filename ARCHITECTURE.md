@@ -156,7 +156,9 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 - 传输不可知，客户端只依赖 `MqttTransport`
 - 模块化运行时，业务逻辑通过 `MqttModule` 接入
 - 构建期配置注入，避免在源码中保存设备凭据和 broker 地址
-- 默认启用 `esp32-log`；MQTT 协议路径固定为 v3.1.1
+- 默认启用 `esp32-log`，应用日志统一走本地日志门面；MQTT/TCP 帧级日志需额外启用 `mqtt-protocol-log`
+- `protocol-log` 统一控制详细协议 dump，当前 HTTP 原始请求 dump 也挂在该 feature 下
+- MQTT 协议路径固定为 v3.1.1
 
 ## 建议的演进顺序
 

@@ -198,8 +198,7 @@ impl<const CAPACITY: usize, const TOPIC_SIZE: usize, const PAYLOAD_SIZE: usize> 
         // Try to store the request; silently drop if full or data too large
         let mut topic_str = heapless::String::new();
         if topic_str.push_str(topic).is_err() {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!(
+            crate::log_warn!(
                 "outbox: topic too long! topic_len={}, max={}",
                 topic.len(),
                 TOPIC_SIZE
@@ -209,8 +208,7 @@ impl<const CAPACITY: usize, const TOPIC_SIZE: usize, const PAYLOAD_SIZE: usize> 
 
         let mut payload_vec = heapless::Vec::new();
         if payload_vec.extend_from_slice(payload).is_err() {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!(
+            crate::log_warn!(
                 "outbox: payload too large! payload_len={}, max={}",
                 payload.len(),
                 PAYLOAD_SIZE
@@ -226,11 +224,9 @@ impl<const CAPACITY: usize, const TOPIC_SIZE: usize, const PAYLOAD_SIZE: usize> 
         };
 
         if self.requests.push(req).is_err() {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!("outbox: queue full! capacity={}", CAPACITY);
+            crate::log_warn!("outbox: queue full! capacity={}", CAPACITY);
         } else {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!(
+            crate::mqtt_protocol_log!(
                 "outbox: added message, topic='{}', retain={}, payload_len={}, queue_size={}",
                 topic,
                 retain,

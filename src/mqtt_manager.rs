@@ -5,7 +5,6 @@ use crate::myrtio_mqtt::{
 use core::str;
 
 use crate::config::{MQTT_BROKER_IP, MQTT_CLIENT_ID, MQTT_PORT};
-use defmt::info;
 use heapless::{String, Vec};
 
 use core::net::SocketAddrV4;
@@ -14,7 +13,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Timer};
-use esp_println::println;
 pub static COLOR_CHANNEL: Channel<CriticalSectionRawMutex, heapless::String<32>, 2> =
     Channel::new();
 // ===== 用静态常量定义所有主题 =====
@@ -55,19 +53,19 @@ impl MessageHandler for CmdHandler {
             let trimmed = cmd.trim();
             match trimmed {
                 "ON" => {
-                    println!("[CMD] Turning device ON");
+                    crate::log_info!("[CMD] Turning device ON");
                     Some("{\"status\":\"on\"}")
                 }
                 "OFF" => {
-                    println!("[CMD] Turning device OFF");
+                    crate::log_info!("[CMD] Turning device OFF");
                     Some("{\"status\":\"off\"}")
                 }
                 "REBOOT" => {
-                    println!("[CMD] Rebooting...");
+                    crate::log_info!("[CMD] Rebooting...");
                     Some("{\"status\":\"rebooting\"}")
                 }
                 _ => {
-                    // println!("[CMD] Unknown command: {}", cmd);
+                    // crate::log_info!("[CMD] Unknown command: {}", cmd);
                     // Some("{\"status\":\"unknown\"}")
                     // 尝试解析为颜色命令 "R,G,B"
                     if let Some((_r, _g, _b)) = parse_color_str(trimmed) {
@@ -75,13 +73,13 @@ impl MessageHandler for CmdHandler {
                         let mut color_str = heapless::String::<32>::new();
                         if color_str.push_str(trimmed).is_ok() {
                             let _ = COLOR_CHANNEL.try_send(color_str);
-                            println!("[CMD] Color command sent to LED: {}", trimmed);
+                            crate::log_info!("[CMD] Color command sent to LED: {}", trimmed);
                         } else {
-                            println!("[CMD] Color string too long");
+                            crate::log_warn!("[CMD] Color string too long");
                         }
                         Some("{\"status\":\"color_set\"}")
                     } else {
-                        println!("[CMD] Unknown command: {}", trimmed);
+                        crate::log_warn!("[CMD] Unknown command: {}", trimmed);
                         Some("{\"status\":\"unknown\"}")
                     }
                 }
@@ -98,8 +96,8 @@ impl MessageHandler for ConfigHandler {
         topic == TOPIC_CONFIG
     }
 
-    fn handle(&self, topic: &str, payload: &[u8]) -> Option<&'static str> {
-        println!("[CONFIG] Received config: {:?}", payload);
+    fn handle(&self, _topic: &str, payload: &[u8]) -> Option<&'static str> {
+        crate::log_info!("[CONFIG] Received config: {:?}", payload);
         // 解析 JSON 配置，更新设备参数...
         Some("{\"status\":\"configured\"}")
     }
@@ -111,8 +109,8 @@ impl MessageHandler for OtaHandler {
         topic == TOPIC_OTA
     }
 
-    fn handle(&self, topic: &str, payload: &[u8]) -> Option<&'static str> {
-        println!("[OTA] Update request: {:?}", payload);
+    fn handle(&self, _topic: &str, payload: &[u8]) -> Option<&'static str> {
+        crate::log_info!("[OTA] Update request: {:?}", payload);
         // 启动 OTA 更新...
         Some("{\"status\":\"updating\"}")
     }
@@ -136,7 +134,7 @@ impl HandlerManager {
                 return handler.handle(publish.topic, publish.payload);
             }
         }
-        println!("[MQTT] Unknown topic: {}", publish.topic);
+        crate::log_warn!("[MQTT] Unknown topic: {}", publish.topic);
         None
     }
 }
@@ -144,14 +142,14 @@ impl HandlerManager {
 // ===== 主任务 =====
 #[embassy_executor::task]
 pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
-    let mut reconnect_delay = Duration::from_secs(5);
+    let reconnect_delay = Duration::from_secs(5);
     let handler_manager = HandlerManager::new(); // 静态初始化
     // ===== 静态分配移到循环外，只初始化一次 =====
     static mut RX_BUFFER: [u8; 1024] = [0; 1024];
     static mut TX_BUFFER: [u8; 1024] = [0; 1024];
     // 外层循环：重连管理
     loop {
-        println!("[MQTT] Connecting to broker...");
+        crate::log_info!("[MQTT] Connecting to broker...");
         // 使用 &raw mut 创建原始指针
         let rx_buffer = unsafe { &mut *(&raw mut RX_BUFFER) };
         let tx_buffer = unsafe { &mut *(&raw mut TX_BUFFER) };
@@ -162,14 +160,15 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
 
         // TCP 连接
         if let Err(e) = socket.connect(endpoint).await {
-            println!(
+            crate::log_warn!(
                 "[MQTT] TCP connect error: {:?}, retrying in {:?}",
-                e, reconnect_delay
+                e,
+                reconnect_delay
             );
             Timer::after(reconnect_delay).await;
             continue;
         }
-        println!("[MQTT] TCP connected");
+        crate::log_info!("[MQTT] TCP connected");
 
         // 创建 transport 和 client
         let transport = TcpTransport::new(socket, Duration::from_secs(10));
@@ -189,18 +188,18 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
 
         // MQTT 连接
         if let Err(e) = client.connect().await {
-            println!("[MQTT] MQTT connect error: {:?}", e);
+            crate::log_warn!("[MQTT] MQTT connect error: {:?}", e);
             Timer::after(reconnect_delay).await;
             continue;
         }
-        println!("[MQTT] MQTT connected!");
+        crate::log_info!("[MQTT] MQTT connected!");
 
         // 订阅所有主题
         for topic in SUB_TOPICS {
             if let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
-                println!("[MQTT] Subscribe to '{}' error: {:?}", topic, e);
+                crate::log_warn!("[MQTT] Subscribe to '{}' error: {:?}", topic, e);
             } else {
-                println!("[MQTT] Subscribed to '{}'", topic);
+                crate::log_info!("[MQTT] Subscribed to '{}'", topic);
             }
         }
 
@@ -215,9 +214,10 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
             let mut pending_response: Option<&str> = None;
             match client.poll().await {
                 Ok(Some(MqttEvent::Publish(publish))) => {
-                    info!(
+                    crate::log_info!(
                         "Received: topic={}, payload={:?}",
-                        publish.topic, publish.payload
+                        publish.topic,
+                        publish.payload
                     );
 
                     // 处理消息，将结果存入 pending_response
@@ -234,11 +234,10 @@ pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    println!("[MQTT] Poll error: {:?}, reconnecting...", e);
+                    crate::log_warn!("[MQTT] Poll error: {:?}, reconnecting...", e);
                     break; // 跳出内层，触发重连
                 }
             }
-            info!("------------{}", pending_response);
             // 在 match 借用结束后，执行发布
             if let Some(response) = pending_response {
                 let _ = client

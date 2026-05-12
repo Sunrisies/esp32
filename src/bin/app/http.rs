@@ -9,7 +9,6 @@ use embassy_net::{
 };
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
-use esp_println::{print, println};
 use reqwless::{
     client::HttpClient,
     request::{Method, RequestBuilder},
@@ -40,7 +39,7 @@ pub async fn serve(ap_stack: Stack<'static>, sta_stack: Stack<'static>) -> ! {
     sta_server_socket.set_timeout(Some(Duration::from_secs(10)));
 
     loop {
-        println!("Wait for connection...");
+        esp32::log_info!("Wait for connection...");
 
         let either_socket = embassy_futures::select::select(
             ap_server_socket.accept(IpListenEndpoint {
@@ -57,10 +56,10 @@ pub async fn serve(ap_stack: Stack<'static>, sta_stack: Stack<'static>) -> ! {
             Either::First(result) => (result, &mut ap_server_socket),
             Either::Second(result) => (result, &mut sta_server_socket),
         };
-        println!("Connected...");
+        esp32::log_info!("Connected...");
 
         if let Err(e) = accept_result {
-            println!("connect error: {:?}", e);
+            esp32::log_warn!("connect error: {:?}", e);
             continue;
         }
 
@@ -73,7 +72,7 @@ pub async fn serve(ap_stack: Stack<'static>, sta_stack: Stack<'static>) -> ! {
         }
 
         if let Err(e) = server_socket.flush().await {
-            println!("AP flush error: {:?}", e);
+            esp32::log_warn!("AP flush error: {:?}", e);
         }
 
         Timer::after(Duration::from_millis(1000)).await;
@@ -97,33 +96,32 @@ async fn read_request(socket: &mut TcpSocket<'_>) {
 
     loop {
         if pos >= buffer.len() {
-            println!("HTTP request header too large");
+            esp32::log_warn!("HTTP request header too large");
             break;
         }
 
         match socket.read(&mut buffer[pos..]).await {
             Ok(0) => {
-                println!("AP read EOF");
+                esp32::log_warn!("AP read EOF");
                 break;
             }
             Ok(len) => {
                 pos += len;
                 match core::str::from_utf8(&buffer[..pos]) {
                     Ok(request) if request.contains("\r\n\r\n") => {
-                        print!("{}", request);
-                        println!();
+                        esp32::protocol_log!("HTTP request:\n{}", request);
                         break;
                     }
                     Ok(_) => {}
                     Err(_) if pos == buffer.len() => {
-                        println!("HTTP request is not valid UTF-8");
+                        esp32::log_warn!("HTTP request is not valid UTF-8");
                         break;
                     }
                     Err(_) => {}
                 }
             }
             Err(e) => {
-                println!("AP read error: {:?}", e);
+                esp32::log_warn!("AP read error: {:?}", e);
                 break;
             }
         };
@@ -135,7 +133,7 @@ async fn proxy_httpbin(
     tcp_client: &TcpClient<'_, 1, 1500, 1500>,
     dns_client: &DnsSocket<'_>,
 ) {
-    println!("connecting via HttpClient...");
+    esp32::log_info!("connecting via HttpClient...");
     let mut client = HttpClient::new(tcp_client, dns_client);
     let mut rx_buf = [0u8; 4096];
 
@@ -148,7 +146,7 @@ async fn proxy_httpbin(
 
             match response_result {
                 Ok(response) => {
-                    println!("HTTP request successful, streaming body...");
+                    esp32::log_info!("HTTP request successful, streaming body...");
 
                     let _ = server_socket.write_all(b"HTTP/1.0 200 OK\r\n").await;
                     let _ = server_socket
@@ -164,19 +162,19 @@ async fn proxy_httpbin(
                             Ok(0) => break,
                             Ok(n) => {
                                 if let Err(e) = server_socket.write_all(&chunk_buf[..n]).await {
-                                    println!("AP write error: {:?}", e);
+                                    esp32::log_warn!("AP write error: {:?}", e);
                                     break;
                                 }
                             }
                             Err(e) => {
-                                println!("Body read error: {:?}", e);
+                                esp32::log_warn!("Body read error: {:?}", e);
                                 break;
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Station request error: {:?}", e);
+                    esp32::log_warn!("Station request error: {:?}", e);
                     let _ = server_socket
                         .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\nRequest failed")
                         .await;
@@ -184,7 +182,7 @@ async fn proxy_httpbin(
             }
         }
         Err(e) => {
-            println!("DNS/Connect error: {:?}", e);
+            esp32::log_warn!("DNS/Connect error: {:?}", e);
             let _ = server_socket
                 .write_all(b"HTTP/1.0 500 Internal Server Error\r\n\r\nDNS Error")
                 .await;
@@ -205,6 +203,6 @@ async fn write_station_down_response(server_socket: &mut TcpSocket<'_>) {
         .await;
 
     if let Err(e) = result {
-        println!("AP write error: {:?}", e);
+        esp32::log_warn!("AP write error: {:?}", e);
     }
 }

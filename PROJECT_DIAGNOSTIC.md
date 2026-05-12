@@ -88,7 +88,7 @@
 1. `src/mqtt_mini.rs`: 空文件应删除，或明确改成后续最小 MQTT 实验入口。
 2. `src/ws2812.rs`: 模块内部包含 crate-level attribute，且 `rgb::ComponentSlice` / `as_slice` 已废弃，当前会持续产生 warning。
 3. `src/bin/main.rs`、`src/bin/app/wifi.rs`、`src/bin/app/led.rs`: 多处 `.unwrap()` 适合 bring-up 阶段，生产固件应替换为可诊断的错误处理或明确 panic 策略。
-4. 日志系统混用 `defmt::info!` 和 `esp_println::println!`，后续建议统一日志层级和 feature 开关。
+4. 已处理：应用日志统一走本地日志门面，默认通过 `esp32-log` 输出；详细协议日志已挂到 `protocol-log` / `mqtt-protocol-log` feature 下。
 5. `Cargo.toml`: `defmt` feature 目前主要用于 derive cfg，但核心 ESP 依赖仍固定开启 defmt，feature 语义还不够干净。
 
 ## Cargo.toml 诊断
@@ -108,6 +108,7 @@
 ### 特性(features)使用情况
 
 - `default` 仅启用 `esp32-log`。
+- `protocol-log` 用于详细协议 dump；`mqtt-protocol-log` 挂载 MQTT/TCP 帧级日志，默认关闭。
 - 已补充 `defmt` feature，避免 `cfg(feature = "defmt")` 触发 `unexpected cfg` 警告。
 - MQTT 协议路径固定为 v3.1.1；未完成的 MQTT v5 properties/reason-code 实现已移除，不再默认启用。
 
@@ -185,4 +186,4 @@
 | 中 | 已完成：拆分 `src/bin/main.rs`，将 Wi-Fi、HTTP、MQTT、LED 控制拆成 `src/bin/app/` 独立模块 | 2026-05-12 已完成 |
 | 低 | 清理 `src/mqtt_mini.rs`、未使用 pubsub 类型、误导性 dead_code allow 和旧注释 | 可择机进行 |
 | 低 | 清理 `src/ws2812.rs` 的 crate-level attribute、废弃 rgb API 和 RGBW 宏路径 | 可择机进行 |
-| 低 | 统一 `defmt` / `esp_println` 日志策略，并把详细协议日志挂到 feature 开关下 | 可择机进行 |
+| 低 | 已完成：统一 `defmt` / `esp_println` 日志策略，并把详细协议日志挂到 `protocol-log` / `mqtt-protocol-log` feature 开关下 | 2026-05-12 已完成 |

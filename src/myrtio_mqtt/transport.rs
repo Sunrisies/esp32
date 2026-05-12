@@ -8,7 +8,6 @@
 //! need for the `#[async_trait]` macro.
 
 use super::error::MqttError;
-use defmt::info;
 use embassy_net::tcp::{Error as TcpError, TcpSocket};
 use embassy_time::{Duration, Timer};
 use embedded_io_async::Write;
@@ -69,14 +68,11 @@ impl<'a> TcpTransport<'a> {
 
         match futures::future::select(core::pin::pin!(read_fut), core::pin::pin!(timer)).await {
             futures::future::Either::Left((Ok(n), _)) => {
-                #[cfg(feature = "esp32-log")]
-                esp_println::println!("TCP read: {} bytes", n);
+                crate::mqtt_protocol_log!("TCP read: {} bytes", n);
 
                 if n == 0 {
                     // If the peer closes the connection, read returns 0.
-                    #[cfg(feature = "esp32-log")]
-                    esp_println::println!("TCP connection closed by peer!");
-                    info!("-----------------");
+                    crate::mqtt_protocol_log!("TCP connection closed by peer!");
                     Err(MqttError::Protocol(
                         super::error::ProtocolError::ConnectionClosed,
                     ))
@@ -85,15 +81,12 @@ impl<'a> TcpTransport<'a> {
                 }
             }
             futures::future::Either::Left((Err(e), _)) => {
-                #[cfg(feature = "esp32-log")]
-                esp_println::println!("TCP read error: {:?}", e);
+                crate::mqtt_protocol_log!("TCP read error: {:?}", e);
 
                 Err(MqttError::Transport(e))
             }
             futures::future::Either::Right(((), _)) => {
-                #[cfg(feature = "esp32-log")]
-                esp_println::println!("TCP read timeout!");
-                info!("--------1111---------");
+                crate::mqtt_protocol_log!("TCP read timeout!");
 
                 Err(MqttError::Timeout)
             }
@@ -105,12 +98,10 @@ impl<'a> MqttTransport for TcpTransport<'a> {
     type Error = MqttError<embassy_net::tcp::Error>;
 
     async fn send(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
-        #[cfg(feature = "esp32-log")]
-        esp_println::println!("TCP TX ({} bytes): {:02X?}", buf.len(), buf);
+        crate::mqtt_protocol_log!("TCP TX ({} bytes): {:02X?}", buf.len(), buf);
 
         self.socket.write_all(buf).await.map_err(|e| {
-            #[cfg(feature = "esp32-log")]
-            esp_println::println!("TCP write error: {:?}", e);
+            crate::mqtt_protocol_log!("TCP write error: {:?}", e);
             MqttError::Transport(e)
         })?;
 
