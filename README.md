@@ -8,7 +8,7 @@
 
 - `src/bin/main.rs`：设备入口，只保留启动顺序、静态资源分配和任务编排
 - `src/bin/app/wifi.rs`：Wi-Fi AP/STA 初始化、网络栈 runner、连接监控
-- `src/bin/app/http.rs`：HTTP 监听、请求读取、到 httpbin 的转发演示
+- `src/bin/app/http.rs`：本地 HTTP 配网页面，可通过 AP 或 STA 入口修改 Wi-Fi 凭据
 - `src/bin/app/mqtt.rs`：MQTT manager 任务启动封装
 - `src/bin/app/led.rs`：WS2812 LED 控制任务
 - `src/myrtio_mqtt/`：可复用的 MQTT 客户端与运行时
@@ -53,7 +53,7 @@ $env:ESP32_MQTT_CLIENT_ID="esp32c6-client"
 - `ESP32_WIFI_SSID`: STA 模式连接的 Wi-Fi SSID
 - `ESP32_WIFI_PASSWORD`: STA 模式连接的 Wi-Fi 密码
 - `ESP32_WIFI_AP_SSID`: 设备 AP 模式 SSID，默认 `esp-radio-apsta`
-- `ESP32_WIFI_AP_IP`: 设备 AP 静态 IP，默认 `192.168.2.1`
+- `ESP32_WIFI_AP_IP`: 设备 AP 静态 IP，默认 `192.168.2.1`，必须是可用的 `/24` 主机地址，不能用 `0.0.0.0`
 - `ESP32_MQTT_BROKER_IP`: MQTT broker IPv4 地址，默认 `0.0.0.0`，实际烧录前必须设置
 - `ESP32_MQTT_PORT`: MQTT broker 端口，默认 `1883`
 - `ESP32_MQTT_CLIENT_ID`: MQTT client id，默认 `esp32c6-client`
@@ -80,13 +80,14 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 - MQTT 协议路径固定为 v3.1.1，未启用未完成的 v5 实现 
 - 工程面向裸机目标，依赖 `esp-hal`、`esp-radio`、`embassy-*` 生态
 - Wi-Fi 凭据和 MQTT broker 地址由 `build.rs` 生成到 `OUT_DIR`，不再保存在源码中
+- 启动后 AP 会先可用，并通过 DHCP 给手机/电脑分配 `192.168.2.x` 地址；访问 `http://192.168.2.1:8080/` 可提交新的 STA SSID/密码并触发重连
+- HTTP 页面提交的 Wi-Fi 凭据当前只在本次运行中生效，尚未写入 flash/NVS
 
 ## 当前已知限制
 
 - `src/mqtt_manager.rs` 仍是手写 MQTT 循环，尚未迁移到 `MqttRuntime` / `MqttModule`
 - MQTT over TCP 还缺少完整帧重组，网络半包/粘包时可能解析失败
 - QoS1 ACK 和并发收包逻辑还需要补强，当前 ACK 等待期间可能跳过业务消息
-- AP/HTTP 调试入口当前依赖 STA 先拿到 IP，不适合配网失败时排障
-- `src/bin/app/http.rs` 的 httpbin 请求属于联网演示，不是生产管理接口
+- AP 默认无密码，适合 bring-up 调试，不适合长期暴露生产设备
 - `.env` 是构建期注入，凭据会进入固件镜像，不等于安全存储
 - `src/ws2812.rs` 仍有废弃 API 和模块级属性 warning

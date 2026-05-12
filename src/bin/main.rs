@@ -67,9 +67,10 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(wifi::connection(controller).unwrap());
     spawner.spawn(wifi::net_task(ap_runner).unwrap());
     spawner.spawn(wifi::net_task(sta_runner).unwrap());
+    spawner.spawn(wifi::dhcp_server_task(ap_stack).unwrap());
     spawner.spawn(led::control_task(rmt, led_pin).unwrap());
-
-    wifi::wait_for_networks(ap_stack, sta_stack).await;
     mqtt::spawn_manager(&spawner, sta_stack);
+
+    wifi::wait_for_access_point(ap_stack, sta_stack).await;
     http::serve(ap_stack, sta_stack).await
 }

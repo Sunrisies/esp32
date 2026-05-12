@@ -22,7 +22,7 @@ fn generate_app_config() {
     let wifi_ssid = config_value("ESP32_WIFI_SSID", "CHANGE_ME_WIFI_SSID", &dot_env);
     let wifi_password = config_value("ESP32_WIFI_PASSWORD", "CHANGE_ME_WIFI_PASSWORD", &dot_env);
     let wifi_ap_ssid = config_value("ESP32_WIFI_AP_SSID", "esp-radio-apsta", &dot_env);
-    let wifi_ap_ip = ipv4_octets("ESP32_WIFI_AP_IP", "192.168.2.1", &dot_env);
+    let wifi_ap_ip = ap_ipv4_octets("ESP32_WIFI_AP_IP", "192.168.2.1", &dot_env);
     let mqtt_broker_ip = ipv4_octets("ESP32_MQTT_BROKER_IP", "0.0.0.0", &dot_env);
     let mqtt_port = port_or_default("ESP32_MQTT_PORT", 1883, &dot_env);
     let mqtt_client_id = config_value("ESP32_MQTT_CLIENT_ID", "esp32c6-client", &dot_env);
@@ -123,6 +123,26 @@ fn ipv4_octets(name: &str, default: &str, dot_env: &DotEnv) -> [u8; 4] {
         .parse()
         .unwrap_or_else(|_| panic!("{name} must be a valid IPv4 address, got `{value}`"));
     address.octets()
+}
+
+fn ap_ipv4_octets(name: &str, default: &str, dot_env: &DotEnv) -> [u8; 4] {
+    let value = config_value(name, default, dot_env);
+    let address: std::net::Ipv4Addr = value
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} must be a valid IPv4 address, got `{value}`"));
+    let octets = address.octets();
+
+    if address.is_unspecified()
+        || address.is_broadcast()
+        || address.is_loopback()
+        || address.is_multicast()
+        || octets[3] == 0
+        || octets[3] == 255
+    {
+        panic!("{name} must be a usable /24 AP host address, got `{value}`");
+    }
+
+    octets
 }
 
 fn port_or_default(name: &str, default: u16, dot_env: &DotEnv) -> u16 {

@@ -56,7 +56,7 @@
 - `src/bin/app/wifi.rs`
   - Wi-Fi AP/STA 初始化、网络栈 runner、连接监控
 - `src/bin/app/http.rs`
-  - HTTP 监听、请求读取、上游 HTTP 客户端转发
+  - 本地 HTTP 配网页面，提供 AP/STA 两个入口的 Wi-Fi 凭据修改接口
 - `src/bin/app/mqtt.rs`
   - MQTT manager 任务启动封装
 - `src/bin/app/led.rs`
@@ -129,9 +129,9 @@ impl MqttModule for MyModule {
 - MQTT over TCP 需要先做帧边界层。TCP read 不等于 MQTT packet，不能让 packet decoder 直接处理任意一次 read 的结果。
 - 业务通道建议放在 topic 层，例如 `device/{device_id}/ch/{channel}/cmd`；如果必须共用一个 topic，则 payload 必须有稳定字段，例如 `channel`、`type`、`value`。
 - 设备 availability 建议使用同一个 retained topic 表示 online/offline，避免 retained offline 状态残留。
-- AP/HTTP 调试入口不应依赖 STA 联网成功。设备配网错误时，AP 侧仍应能提供诊断信息。
+- AP/HTTP 调试入口已从 STA 联网状态解耦。设备配网错误时，AP 侧仍能提供本地 Wi-Fi 配置页面。
 - `.env` 只适合构建期注入，不是安全凭据存储。烧录后的固件中仍包含这些字符串。
-- `src/bin/app/http.rs` 的 httpbin 代理属于联网演示，不应作为长期设备管理接口。
+- HTTP 提交的新 Wi-Fi 凭据当前只在运行时生效，后续需要接入 flash/NVS 才能跨重启保存。
 - `src/ws2812.rs` 目前像从独立 crate 搬入的适配器，仍需要整理 crate-level attribute、RGBW 宏路径、RMT 时钟假设和废弃 rgb API。
 
 ## 可编译示例
@@ -162,7 +162,7 @@ cargo check --examples --target riscv32imac-unknown-none-elf
 
 ## 建议的演进顺序
 
-1. 先修复 Wi-Fi 密码大小写、MQTT 帧边界、packet 解码边界检查和 retained availability 这类会直接影响联网结果的问题。
+1. 先修复 MQTT 帧边界、packet 解码边界检查和 retained availability 这类会直接影响联网结果的问题。
 2. 再把 `src/mqtt_manager.rs` 迁移为一个或多个 `MqttModule`，让 topic 注册、消息分发和发布都走统一 runtime。
-3. 然后整理 HTTP 和 LED：HTTP 从 httpbin demo 改成本地配置/status API，LED 命令从纯字符串升级为稳定命令协议。
+3. 然后整理 HTTP 和 LED：HTTP 配置页接入凭据持久化，LED 命令从纯字符串升级为稳定命令协议。
 4. 最后清理依赖、日志、WS2812 适配器和 RAM 预算，让工程从学习示例收敛成可维护固件。

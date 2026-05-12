@@ -53,8 +53,8 @@
 
 ### 高优先级
 
-1. `src/bin/app/wifi.rs`: `WIFI_PASSWORD.to_ascii_lowercase()` 会把 Wi-Fi 密码强制转小写。Wi-Fi 密码区分大小写，这会导致真实密码无法连接。
-2. `src/bin/main.rs` / `src/bin/app/wifi.rs`: 启动流程会先等待 STA 获取 IP，再启动 MQTT 和 HTTP 服务。如果家庭 Wi-Fi 配置错误，AP 虽然启动了，但 HTTP 服务不会进入主循环，不利于现场调试或配网。
+1. 已处理：`src/bin/app/wifi.rs` 不再把 `WIFI_PASSWORD` 强制转小写，运行时 Wi-Fi 配置也保持原始大小写。
+2. 已处理：启动流程不再等待 STA 获取 IP 才启动 HTTP；AP 本地配网页面会先可用，MQTT 在后台等待 STA ready 后启动。
 3. `src/mqtt_manager.rs`: TCP socket 的 RX/TX 缓冲区使用 `static mut` 加 `unsafe` 可变引用。当前只有一个任务使用时风险可控，但后续重构或多任务接入时容易产生别名可变引用问题。
 4. `src/myrtio_mqtt/transport.rs` / `src/myrtio_mqtt/packet.rs`: 当前 MQTT 解码假设一次 TCP `recv` 就是一个完整 MQTT 包。TCP 是字节流，可能半包、粘包或一次读到多个包；当前实现没有按 remaining length 做帧重组。
 5. `src/myrtio_mqtt/packet.rs`: 多处解码直接用 `buf[cursor]` / `buf[cursor + 1]`，对短包、半包、畸形包可能 panic，而不是返回 `MalformedPacket`。
@@ -73,11 +73,11 @@
 7. `src/myrtio_mqtt/client.rs`: `MqttClient<'a, T, const MAX_TOPICS, const BUF_SIZE>` 中 `MAX_TOPICS` 对直接 client 没有实际用途，topic 容量应该属于 runtime/registry。
 8. `src/myrtio_mqtt/error.rs` / `src/myrtio_mqtt/transport.rs`: `TcpTransport::Error` 现在是 `MqttError<tcp::Error>`，外层 client 又返回 `MqttError<T::Error>`，会形成嵌套错误类型，后续错误处理会变复杂。
 9. `src/myrtio_mqtt/runtime/event_loop.rs`: `MqttRuntime::run` 遇到连接错误会返回，尚未内建自动重连策略；调用方需要自行包一层 reconnect loop。
-10. `src/bin/app/http.rs`: HTTP 服务硬编码访问 `httpbin.org`，更像联网演示，不适合作为设备本地管理接口的长期逻辑。
+10. 已处理：`src/bin/app/http.rs` 已从 httpbin 代理改成本地 Wi-Fi 配置页面。
 11. `src/bin/app/http.rs`: AP socket 和 STA socket 在同一个循环里串行处理，一次只处理一个连接；并发连接或慢客户端会阻塞另一个入口。
-12. `src/bin/app/http.rs`: 只用 `sta_stack.is_link_up()` 判断能否代理请求，链路 up 不等于 DHCP/DNS/路由都可用。
+12. 已处理：HTTP 不再代理上游请求，不再依赖 `sta_stack.is_link_up()` 判断外网可用性。
 13. `src/bin/app/wifi.rs`: AP 模式默认无密码，适合调试，不适合长期暴露设备控制入口。
-14. `src/bin/main.rs` / `src/bin/app/http.rs` / `src/mqtt_manager.rs`: 多个 1024 到 4096 字节数组会进入 async future 状态机或静态内存，ESP32C6 上需要明确 RAM 预算。
+14. `src/bin/main.rs` / `src/bin/app/http.rs` / `src/mqtt_manager.rs`: 多个 1024 级缓冲区会进入 async future 状态机或静态内存，ESP32C6 上需要明确 RAM 预算。
 15. `build.rs` / `src/config.rs`: `.env` 是构建期注入，会进入固件镜像；它解决“不提交源码”，不等于安全存储设备凭据。
 16. `build.rs`: 未配置时仍使用 `CHANGE_ME_*` 和 `0.0.0.0` 生成可编译固件，容易烧录出必然无法联网的镜像。
 17. `src/ws2812.rs` / `src/bin/app/led.rs`: RMT 初始化使用 40 MHz，但适配器内部按 `Clocks::get().apb_clock` 计算脉冲，时基假设需要核对，否则 WS2812 时序可能不准。
@@ -148,11 +148,11 @@
 ### 潜在的内存/性能风险
 
 1. `src/mqtt_manager.rs` 使用 `static mut RX_BUFFER/TX_BUFFER` 加 `unsafe` 可变借用，在异步重连和未来任务扩展下风险较高。
-2. `src/bin/app/http.rs`、`src/myrtio_mqtt/client.rs`、`src/mqtt_manager.rs` 存在多个 1024 至 4096 字节栈缓冲，嵌入式环境下需核算任务栈。
+2. `src/bin/app/http.rs`、`src/myrtio_mqtt/client.rs`、`src/mqtt_manager.rs` 存在多个 1024 级缓冲，嵌入式环境下需核算任务栈。
 3. `src/myrtio_mqtt/client.rs` 在等待 `PUBACK` / `SUBACK` 时跳过 `Publish` 包，可能丢失并发到达的业务消息。
 4. `src/myrtio_mqtt/runtime/publisher.rs` 的 `BufferedOutbox` 在容量不足或 payload 过大时静默丢弃发布请求。
 5. `src/myrtio_mqtt/transport.rs` 直接把一次 TCP read 交给 packet decode，缺少 MQTT 帧缓冲，网络抖动时可能出现半包解析失败或粘包污染 payload。
-6. `src/bin/app/http.rs` 的 HTTP 代理路径需要 DNS、TCP client、4 KB 响应缓冲和 1 KB chunk 缓冲，和 Wi-Fi/MQTT/LED 同时运行时需要做 RAM 峰值评估。
+6. HTTP 配置页提交的新 Wi-Fi 凭据当前只在运行时生效，尚未接入 flash/NVS 持久化。
 
 ### 文档覆盖率
 
@@ -166,7 +166,7 @@
 
 | 优先级 | 行动内容 | 建议负责人/时间 |
 | --- | --- | --- |
-| 高 | 修复 Wi-Fi 密码强制小写问题，保持 `WIFI_PASSWORD` 原始大小写 | 建议立即完成 |
+| 高 | 已完成：修复 Wi-Fi 密码强制小写问题，保持 `WIFI_PASSWORD` 原始大小写 | 2026-05-12 已完成 |
 | 高 | 为 MQTT over TCP 增加帧重组层，按 remaining length 读取完整包，并处理半包/粘包 | 建议本周完成 |
 | 高 | 补齐 MQTT packet 解码边界检查，所有短包/畸形包必须返回错误而不是 panic | 建议本周完成 |
 | 高 | 修复 QoS1 ACK 逻辑，`PubAck::decode` 解析 packet id，等待 ACK 时不能丢弃业务 `Publish` 包 | 建议本周完成 |
@@ -175,11 +175,11 @@
 | 高 | 移除 `src/mqtt_manager.rs` 中的 `static mut`，改用 `StaticCell` 或受控缓冲 | 建议本周完成 |
 | 高 | 修正在线/离线状态 topic 和 retain 策略，避免 retained offline 状态残留 | 建议本周完成 |
 | 高 | 已完成：将 Wi-Fi SSID、密码和 MQTT broker 地址从源码迁出，由 `build.rs` 从环境变量或 `.env` 生成配置 | 2026-05-12 已完成 |
-| 中 | 调整启动流程，让 AP/本地 HTTP 调试入口不依赖 STA 成功联网 | 建议下个迭代 |
+| 中 | 已完成：调整启动流程，让 AP/本地 HTTP 配网页面不依赖 STA 成功联网 | 2026-05-12 已完成 |
 | 中 | 统一 MQTT topic 设计，加入 device id / channel id，避免多设备 topic 冲突 | 建议下个迭代 |
 | 中 | 明确命令 payload 协议，优先选择多 topic 分流，或统一 JSON/二进制结构中的 `channel` 字段 | 建议下个迭代 |
 | 中 | 给 `MqttRuntime::run` 外层增加 reconnect loop，或在 runtime 内提供可配置重连策略 | 建议下个迭代 |
-| 中 | 把 HTTP httpbin 代理标记为 demo，生产路径改成本地配置/status API | 建议下个迭代 |
+| 中 | 已完成：移除 HTTP httpbin 代理，改成本地 Wi-Fi 配置页面 | 2026-05-12 已完成 |
 | 中 | 核算 Embassy task future、TCP buffer、MQTT buffer、HTTP buffer、Wi-Fi 驱动的 RAM 峰值 | 建议下个迭代 |
 | 中 | 已完成：清理 Cargo features，补充 `defmt` feature，移除默认 `v5` 和未完成的 MQTT v5 代码，并删除未使用的 `log` / `critical-section` 直接依赖 | 2026-05-12 已完成 |
 | 中 | 为 MQTT packet 编解码、`PUBACK` / `SUBACK`、buffer 边界和 `TopicRegistry` 增加最小测试集 | 建议下个迭代 |

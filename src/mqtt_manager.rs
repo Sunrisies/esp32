@@ -142,6 +142,10 @@ impl HandlerManager {
 // ===== 主任务 =====
 #[embassy_executor::task]
 pub async fn mqtt_manager_task(stack: Stack<'static>) -> ! {
+    run_mqtt_manager(stack).await
+}
+
+pub async fn run_mqtt_manager(stack: Stack<'static>) -> ! {
     let reconnect_delay = Duration::from_secs(5);
     let handler_manager = HandlerManager::new(); // 静态初始化
     // ===== 静态分配移到循环外，只初始化一次 =====
