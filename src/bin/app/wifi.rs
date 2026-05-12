@@ -23,6 +23,7 @@ pub const MAX_WIFI_PASSWORD_LEN: usize = 64;
 
 const PLACEHOLDER_WIFI_SSID: &str = "CHANGE_ME_WIFI_SSID";
 const PLACEHOLDER_WIFI_PASSWORD: &str = "CHANGE_ME_WIFI_PASSWORD";
+const PROVISIONING_WINDOW_SECS: u64 = 30;
 const DHCP_SERVER_PORT: u16 = 67;
 const DHCP_CLIENT_PORT: u16 = 68;
 const DHCP_PACKET_BUFFER_SIZE: usize = 768;
@@ -202,6 +203,7 @@ pub async fn wait_for_access_point(ap_stack: Stack<'static>, sta_stack: Stack<'s
 pub async fn connection(mut controller: WifiController<'static>) {
     esp32::log_info!("start connection task");
     let mut credentials = current_credentials();
+    let mut first_sta_attempt = true;
 
     loop {
         let Some(active_credentials) = credentials.clone() else {
@@ -209,8 +211,32 @@ pub async fn connection(mut controller: WifiController<'static>) {
             let updated = WIFI_CONFIG_SIGNAL.wait().await;
             set_current_credentials(Some(updated.clone()));
             credentials = Some(updated);
+            first_sta_attempt = false;
             continue;
         };
+
+        if first_sta_attempt {
+            esp32::log_info!(
+                "Provisioning window: keeping AP stable for {}s before STA connect",
+                PROVISIONING_WINDOW_SECS
+            );
+            match select(
+                Timer::after(Duration::from_secs(PROVISIONING_WINDOW_SECS)),
+                WIFI_CONFIG_SIGNAL.wait(),
+            )
+            .await
+            {
+                Either::First(()) => {}
+                Either::Second(updated) => {
+                    esp32::log_info!("Received updated STA Wi-Fi credentials");
+                    set_current_credentials(Some(updated.clone()));
+                    credentials = Some(updated);
+                    first_sta_attempt = false;
+                    continue;
+                }
+            }
+            first_sta_attempt = false;
+        }
 
         if let Err(e) =
             apply_access_point_station_config(&mut controller, Some(&active_credentials))
@@ -230,7 +256,7 @@ pub async fn connection(mut controller: WifiController<'static>) {
                     MonitorOutcome::Updated(updated) => {
                         esp32::log_info!("Received updated STA Wi-Fi credentials");
                         set_current_credentials(Some(updated.clone()));
-                        let _ = controller.disconnect_async().await;
+                        Timer::after(Duration::from_secs(5)).await;
                         credentials = Some(updated);
                     }
                 }
@@ -241,7 +267,7 @@ pub async fn connection(mut controller: WifiController<'static>) {
             ConnectOutcome::Updated(updated) => {
                 esp32::log_info!("Received updated STA Wi-Fi credentials");
                 set_current_credentials(Some(updated.clone()));
-                let _ = controller.disconnect_async().await;
+                Timer::after(Duration::from_secs(5)).await;
                 credentials = Some(updated);
             }
         }

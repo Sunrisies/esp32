@@ -33,12 +33,7 @@ pub async fn control_task(
                 if let Some(rgb) = parse_color_str(&cmd_str) {
                     current_color = rgb;
                     let _ = led.write([current_color].into_iter());
-                    esp32::log_info!(
-                        "LED color changed to R: {}, G: {}, B: {}",
-                        current_color.r,
-                        current_color.g,
-                        current_color.b
-                    );
+
                     command_until = Instant::now() + Duration::from_secs(3);
                 }
             }
@@ -46,12 +41,7 @@ pub async fn control_task(
                 if Instant::now() >= command_until {
                     current_color = colors[auto_idx % 3];
                     let _ = led.write([current_color].into_iter());
-                    esp32::log_info!(
-                        "LED color changed to R: {}, G: {}, B: {}",
-                        current_color.r,
-                        current_color.g,
-                        current_color.b
-                    );
+
                     auto_idx += 1;
                 }
             }
